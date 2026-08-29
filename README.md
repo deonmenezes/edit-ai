@@ -1,12 +1,45 @@
 # EditAI
 
-AI-powered video editor for the web.
+**An AI video editor you talk to.** Say "remove the silences" or "caption every clip", and an agent
+makes the edit on your real timeline: it reads the project, decides which cuts to make, and applies
+them. Anything destructive stops and asks you first.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat)](LICENSE)
 
-An editor where you describe the change and an agent makes it: "remove the silences", "caption
-every clip", "cut the intro to three seconds". The agent edits the real timeline through tools, and
-anything destructive stops for your approval first.
+The tedious parts of editing are the ones a machine should do. Cutting dead air out of a
+twenty-minute take is thirty minutes of scrubbing; here it is one sentence and one approval click.
+Captioning every clip means transcribing each one by hand; here a sub-agent handles each clip in
+parallel and the captions land on their own track, timed. The agent does the mechanical work, and
+you keep the decisions: it proposes, you approve, and every edit is undoable.
+
+### What it can do today
+
+| Ask for this | What the agent does |
+| --- | --- |
+| *"Remove the silences"* | Finds every silent range on the voice track and ripple-deletes it across all tracks, closing the gaps. Verified: 24s → 21.1s, exactly the 2.9s of silence. |
+| *"Caption every video clip"* | Fans out one sub-agent per clip to transcribe in parallel, merges the results, and lays timed captions on a new track. |
+| *"Cut the intro to 3 seconds"* | Trims the clip, keeping the media in sync by moving its source offset. |
+| *"Duck the music under the voiceover"* | Sets clip volume. |
+| *"Split this at 15 seconds"* | Cuts a clip in two, both halves still frame-accurate. |
+| *"Export it at 1080p"* | Renders, after you approve. |
+
+### The agent tools
+
+The timeline is exposed to the agent as **16 [MCP](https://modelcontextprotocol.io) tools**, not as
+a prompt describing a timeline. The agent calls real functions against real state:
+
+- **Read:** `get_project`, `transcribe_clip`, `find_silences`, `detect_beats`, `list_changes`
+- **Write:** `split_clip`, `trim_clip`, `move_clip`, `set_volume`, `add_text`, `add_captions`, `undo`
+- **Destructive:** `delete_clip`, `ripple_delete`, `remove_silences`
+- **Gated:** `export_project`
+
+Every tool validates its input and returns errors to the model as data, so a stale clip id becomes
+a correction the agent recovers from rather than a failed turn. The destructive four are published
+with MCP's `destructiveHint` annotation, which is what makes the harness stop and ask you before
+they run.
+
+Because it is MCP, the same agent can reach anything else that speaks MCP: web search, your issue
+tracker, an internal API you wrap yourself. Connectors attach by name and authorize in chat.
 
 ## How it works
 
