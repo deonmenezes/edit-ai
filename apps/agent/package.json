@@ -1,0 +1,25 @@
+{
+  "name": "@editai/agent",
+  "private": true,
+  "type": "module",
+  "description": "EditAI agent server: the timeline exposed as MCP tools for TrueForge, plus a live project store for the web app.",
+  "scripts": {
+    "dev": "bun --watch src/server.ts",
+    "start": "bun src/server.ts",
+    "setup": "bun scripts/setup.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.2",
+    "typescript": "^6.0.2"
+  }
+}

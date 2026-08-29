@@ -1,35 +1,114 @@
 # EditAI
 
-AI-powered video editor for the web.
+**An AI video editor you talk to.** Say "remove the silences" or "caption every clip", and an agent
+makes the edit on your real timeline: it reads the project, decides which cuts to make, and applies
+them. Anything destructive stops and asks you first.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat)](LICENSE)
 
-## Status
+The tedious parts of editing are the ones a machine should do. Cutting dead air out of a
+twenty-minute take is thirty minutes of scrubbing; here it is one sentence and one approval click.
+Captioning every clip means transcribing each one by hand; here a sub-agent handles each clip in
+parallel and the captions land on their own track, timed. The agent does the mechanical work, and
+you keep the decisions: it proposes, you approve, and every edit is undoable.
 
-Early development. The web app is a scaffold right now; the editor, timeline, and AI features are being built.
+### What it can do today
 
-## Stack
+| Ask for this | What the agent does |
+| --- | --- |
+| *"Remove the silences"* | Finds every silent range on the voice track and ripple-deletes it across all tracks, closing the gaps. Verified: 24s → 21.1s, exactly the 2.9s of silence. |
+| *"Caption every video clip"* | Fans out one sub-agent per clip to transcribe in parallel, merges the results, and lays timed captions on a new track. |
+| *"Cut the intro to 3 seconds"* | Trims the clip, keeping the media in sync by moving its source offset. |
+| *"Duck the music under the voiceover"* | Sets clip volume. |
+| *"Split this at 15 seconds"* | Cuts a clip in two, both halves still frame-accurate. |
+| *"Export it at 1080p"* | Renders, after you approve. |
 
-- [TanStack Start](https://tanstack.com/start) + React 19
-- Vite + Tailwind CSS v4 + shadcn/ui
-- Cloudflare Workers (via Wrangler)
-- Bun + Turborepo monorepo
+### The agent tools
+
+The timeline is exposed to the agent as **16 [MCP](https://modelcontextprotocol.io) tools**, not as
+a prompt describing a timeline. The agent calls real functions against real state:
+
+- **Read:** `get_project`, `transcribe_clip`, `find_silences`, `detect_beats`, `list_changes`
+- **Write:** `split_clip`, `trim_clip`, `move_clip`, `set_volume`, `add_text`, `add_captions`, `undo`
+- **Destructive:** `delete_clip`, `ripple_delete`, `remove_silences`
+- **Gated:** `export_project`
+
+Every tool validates its input and returns errors to the model as data, so a stale clip id becomes
+a correction the agent recovers from rather than a failed turn. The destructive four are published
+with MCP's `destructiveHint` annotation, which is what makes the harness stop and ask you before
+they run.
+
+Because it is MCP, the same agent can reach anything else that speaks MCP: web search, your issue
+tracker, an internal API you wrap yourself. Connectors attach by name and authorize in chat.
+
+## How it works
+
+EditAI is built on [TrueForge](https://trueforge.dev), an open-source agent harness. The harness
+runs the agent loop; EditAI supplies the domain.
+
+```
+  browser                    harness                     domain
+┌──────────────┐   HTTP    ┌──────────────┐   MCP    ┌──────────────────┐
+│  editor UI   │◄─────────►│  TrueForge   │◄────────►│  @editai/agent   │
+│  (apps/web)  │  + SSE    │  agent loop  │          │  16 timeline     │
+│              │           │  approvals   │          │  tools           │
+│  timeline ◄──┼───────────┼──────────────┼── SSE ───┤  project store   │
+└──────────────┘           └──────────────┘          └──────────────────┘
+```
+
+The editor never calls a model. It creates a session, streams turn events, renders tool calls and
+sub-agent threads, and answers the harness when it pauses. The timeline redraws from the agent
+server's event stream, so an edit the agent makes shows up in the UI as it happens.
+
+| Capability | Where it lives |
+| --- | --- |
+| MCP tools, your own and the catalog's | `apps/agent/src/tools.ts`; `setup.ts` also attaches catalog servers, including OAuth ones (verified against Linear) and keyless web search |
+| Human approvals before destructive edits | MCP `destructiveHint` annotations → `require_approval_for_tools` → the approval card in `apps/web/src/components/editor/assistant-panel.tsx` |
+| Sub-agents | Enabled on the agent; per-clip fan-out for captioning, rendered as threads in the UI |
+| Sessions that survive a reload | `apps/web/src/components/editor/use-assistant.ts` replays turns and re-attaches to a running one |
+| Any model provider | `apps/agent/scripts/setup.ts` registers whichever API keys are present, including any OpenAI-compatible endpoint |
+| Sandboxed execution | Configured automatically when `DAYTONA_API_KEY` is set |
 
 ## Getting started
 
+You need [Bun](https://bun.sh) and Node 22.14+ (for the harness).
+
 ```bash
 bun install
-bun run dev:web
+
+# 1. the harness
+npx @truefoundry/trueforge@latest        # http://localhost:8790
+
+# 2. the timeline tools
+cd apps/agent && bun run start           # http://localhost:8941
+
+# 3. wire them together (any one key is enough)
+ANTHROPIC_API_KEY=sk-... bun run setup
+
+# 4. the editor
+cd ../.. && bun run dev:web              # http://localhost:5173
 ```
 
-The web app runs at http://localhost:5173.
+Then ask for an edit: "Remove the silences", "Caption every video clip".
+
+Without the harness running, the editor still loads with a sample timeline; the assistant panel
+says it is offline.
+
+## Stack
+
+- [TanStack Start](https://tanstack.com/start) + React 19, Vite, Tailwind CSS v4, shadcn/ui
+- [TrueForge](https://trueforge.dev) agent harness, [MCP](https://modelcontextprotocol.io) tools
+- Cloudflare Workers (via Wrangler), Bun + Turborepo monorepo
 
 ## Layout
 
 ```
 apps/
-  web/   TanStack Start app (deploys to Cloudflare Workers)
+  web/     the editor: timeline, preview, assistant panel
+  agent/   MCP server exposing the timeline, plus the agent definition
 ```
+
+See [apps/agent/README.md](apps/agent/README.md) for the tool reference and timeline semantics.
 
 ## Scripts
 
@@ -39,6 +118,38 @@ apps/
 | `bun run dev:web`   | Run only the web app                  |
 | `bun run build`     | Build every app                       |
 | `bun run deploy`    | Build and deploy to Cloudflare        |
+
+## Qodo code review evidence
+
+[PR #3](https://github.com/deonmenezes/edit-ai/pull/3) was reviewed with Qodo Merge, which raised
+three issues. All three were real and all three are fixed in the PR:
+
+1. **Duplicate clip ids after repeated ripple deletes** (`apps/agent/src/project.ts`). The
+   right-hand half of a split clip took the id `${c.id}r`, so a clip cut more than once produced
+   the same id twice. Reproduced on the sample project: `removeSilences` left three clips sharing
+   `c6r` and three sharing `c7r`, which breaks clip lookup, deletion and React keys. Ids are now
+   allocated from the set of ids in use. Covered by three regression tests.
+2. **Export announced before the file existed.** `exportProject` committed the record, which
+   notifies SSE subscribers synchronously, and only then wrote the file. The write now happens
+   first.
+3. **The session-restore effect leaked its stream on unmount**, calling `setState` on a gone
+   component and leaving the connection open. Its cleanup now aborts the controller.
+
+The first finding is the one that mattered: the test suite had missed it, because the existing
+ripple-delete test asserted the buggy `c1r` id as if it were correct.
+
+A second review of the updated PR raised three more. Two were real and fixed; one was checked and
+rejected:
+
+- **Real:** a header-auth connector whose env var had no `: value` registered an empty header and
+  failed silently. It now reports the expected format instead.
+- **Real:** `setup.ts` POSTs API keys to the harness, so it now refuses to do that over plaintext
+  HTTP to anything but localhost.
+- **False positive:** the reviewer called the source-media bound in `trimClip`
+  (`end - (c.start - c.sourceOffset)`) wrong and predicted a clip could be extended to 28s instead
+  of 18s. The expression expands to `c.sourceOffset + (end - c.start)`, which is the correct source
+  time, and the code accepts exactly up to the limit and rejects one frame past it. Two tests now
+  pin that boundary so the correct form is not "fixed" into a broken one later.
 
 ## Contributing
 
