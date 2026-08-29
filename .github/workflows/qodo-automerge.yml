@@ -1,0 +1,84 @@
+name: Qodo auto-merge
+
+# Qodo posts its verdict as an issue comment. It publishes no check run, no
+# commit status and no approving review, so GitHub's own auto-merge has nothing
+# to gate on. This workflow is that missing gate: it reads the verdict Qodo
+# actually emits and merges only on a clean one.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  merge-on-clean-review:
+    # issue_comment fires for issues too, so confirm this is a PR, and that the
+    # comment is Qodo's own. Checking the bot id as well as the login matters:
+    # a login is display text a human account could imitate, the id cannot be.
+    if: >
+      github.event.issue.pull_request != null &&
+      github.event.comment.user.login == 'qodo-code-review[bot]' &&
+      github.event.comment.user.type == 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read the verdict
+        id: verdict
+        env:
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          # Two shapes mean the same thing: the explicit all-clear, or all three
+          # counters at zero. Anything else, including a body we cannot parse,
+          # is treated as "not clean" so an unreadable review never merges.
+          clean=false
+          if grep -qF 'no issues found' <<<"$BODY"; then
+            clean=true
+          elif grep -qE 'Bugs \(0\)' <<<"$BODY" \
+            && grep -qE 'Rule violations \(0\)' <<<"$BODY" \
+            && grep -qE 'Requirement gaps \(0\)' <<<"$BODY"; then
+            clean=true
+          fi
+          echo "clean=$clean" >> "$GITHUB_OUTPUT"
+          echo "Qodo verdict clean: $clean"
+
+      - name: Merge
+        if: steps.verdict.outputs.clean == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          state=$(gh pr view "$PR" --repo "$REPO" \
+            --json state,isDraft,mergeable --jq '[.state,.isDraft,.mergeable]|@tsv')
+          IFS=$'\t' read -r pr_state is_draft mergeable <<<"$state"
+
+          if [ "$pr_state" != "OPEN" ] || [ "$is_draft" = "true" ]; then
+            echo "PR is $pr_state (draft=$is_draft); nothing to merge."; exit 0
+          fi
+          if [ "$mergeable" != "MERGEABLE" ]; then
+            echo "PR is $mergeable; a human should resolve this."; exit 0
+          fi
+
+          # A clean review is not a green build. Qodo reads the diff; it does not
+          # run the tests, so the build still has to pass on its own.
+          failed=$(gh pr checks "$PR" --repo "$REPO" --json name,state \
+            --jq '[.[] | select(.state == "FAILURE" or .state == "ERROR" or .state == "CANCELLED")] | length' 2>/dev/null || echo 0)
+          pending=$(gh pr checks "$PR" --repo "$REPO" --json name,state \
+            --jq '[.[] | select(.state == "PENDING" or .state == "IN_PROGRESS" or .state == "QUEUED")] | length' 2>/dev/null || echo 0)
+
+          if [ "$failed" != "0" ]; then
+            echo "$failed check(s) failing; refusing to merge."; exit 0
+          fi
+          if [ "$pending" != "0" ]; then
+            # Hand off to GitHub rather than polling: it merges when checks land.
+            echo "$pending check(s) still running; enabling native auto-merge."
+            gh pr merge "$PR" --repo "$REPO" --merge --auto
+            exit 0
+          fi
+
+          gh pr merge "$PR" --repo "$REPO" --merge
+          echo "Merged #$PR on a clean Qodo review."

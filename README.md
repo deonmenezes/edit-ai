@@ -148,6 +148,18 @@ not estimate, and the media sandbox is for work that must reach the media files.
 
 ## Qodo Code Review Evidence
 
+### Merging on the review
+
+Qodo posts its verdict as an issue comment. It publishes no check run, no commit
+status and no approving review, so GitHub's own auto-merge has nothing to gate
+on. `.github/workflows/qodo-automerge.yml` is that missing gate: it reads the
+verdict Qodo actually emits and merges only when the review is clean, the build
+is green and the branch is mergeable.
+
+It refuses to merge on anything it cannot read. A body that matches neither the
+all-clear nor three zero counters counts as not clean, so a parsing change on
+Qodo's side stalls the merge instead of waving it through.
+
 Every pull request below was reviewed by Qodo before it merged:
 
 | PR | What it added | Qodo reviews | Findings |
