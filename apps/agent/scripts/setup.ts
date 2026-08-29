@@ -15,6 +15,11 @@ const here = dirname(fileURLToPath(import.meta.url))
 const TF = (process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790").replace(/\/$/, "")
 const MCP_URL = process.env.EDITAI_MCP_URL ?? `http://localhost:${process.env.EDITAI_AGENT_PORT ?? 8941}/mcp`
 const AGENT_NAME = process.env.EDITAI_AGENT_NAME ?? "editai"
+/** Catalog connectors to attach alongside the timeline tools. Keyless by default. */
+const CONNECTORS = (process.env.EDITAI_CONNECTORS ?? "exa")
+  .split(",")
+  .map((c) => c.trim())
+  .filter(Boolean)
 const headers: Record<string, string> = { "content-type": "application/json" }
 if (process.env.TRUEFORGE_TOKEN) headers.authorization = `Bearer ${process.env.TRUEFORGE_TOKEN}`
 
@@ -88,6 +93,8 @@ async function configureProviders() {
   return configured
 }
 
+type CatalogServer = { name: string; url: string; description?: string; auth?: { type: string } | null }
+
 async function configureMcp() {
   await api("PUT", "/settings/mcp-servers", {
     manifest: {
@@ -99,6 +106,54 @@ async function configureMcp() {
   })
   const { data } = await api<{ data: { name: string }[] }>("GET", "/mcp-servers/editai/tools")
   return data.data.map((t) => t.name)
+}
+
+/**
+ * Attaches extra MCP servers. Catalog entries are looked up by name; a server with no auth
+ * works immediately, one using OAuth (dynamic client registration) is registered here and
+ * authorized by the user in chat the first time the agent reaches for it.
+ */
+async function configureConnectors(): Promise<{ name: string; auth: string }[]> {
+  if (CONNECTORS.length === 0) return []
+  const { data } = await api<{ data: CatalogServer[] }>("GET", "/catalogs/mcp-servers")
+  const attached: { name: string; auth: string }[] = []
+  for (const name of CONNECTORS) {
+    const entry = data.data.find((c) => c.name === name)
+    if (!entry) {
+      console.warn(`  skip connector "${name}": not in the catalog`)
+      continue
+    }
+    const authType = entry.auth?.type ?? null
+    if (authType === "header") {
+      const key = process.env[`${name.toUpperCase().replace(/-/g, "_")}_MCP_HEADER`]
+      if (!key) {
+        console.warn(`  skip connector "${name}": needs ${name.toUpperCase().replace(/-/g, "_")}_MCP_HEADER (e.g. "Authorization: Bearer ...")`)
+        continue
+      }
+      const [header, ...rest] = key.split(":")
+      await api("PUT", "/settings/mcp-servers", {
+        manifest: {
+          type: "remote",
+          name,
+          url: entry.url,
+          description: entry.description ?? name,
+          auth: { type: "header", headers: { [header!.trim()]: rest.join(":").trim() } },
+        },
+      })
+    } else {
+      await api("PUT", "/settings/mcp-servers", {
+        manifest: {
+          type: "remote",
+          name,
+          url: entry.url,
+          description: entry.description ?? name,
+          ...(authType === "dcr" ? { auth: { type: "dcr" } } : {}),
+        },
+      })
+    }
+    attached.push({ name, auth: authType ?? "none" })
+  }
+  return attached
 }
 
 async function configureSandbox(): Promise<boolean> {
@@ -144,10 +199,16 @@ async function pickModel(): Promise<string> {
   return preferred.find((p) => names.includes(p)) ?? names[0]!
 }
 
-async function upsertAgent(model: string, sandbox: boolean) {
+async function upsertAgent(model: string, sandbox: boolean, connectors: { name: string; auth: string }[]) {
   const manifest = JSON.parse(readFileSync(join(here, "..", "agent.json"), "utf8"))
   manifest.model.name = model
   manifest.config.sandbox.enabled = sandbox
+  // Extra connectors are read-only and deferred: they should not enlarge the tool context
+  // unless the agent actually reaches for research.
+  for (const c of connectors) {
+    if (manifest.mcp_servers.some((m: { name: string }) => m.name === c.name)) continue
+    manifest.mcp_servers.push({ name: c.name, enable_tools: ["@read-only"], preload: false })
+  }
   const { data: list } = await api<{ data: { id: string; name: string }[] }>("GET", "/agents")
   const existing = list.data.find((a) => a.name === AGENT_NAME)
   if (existing) {
@@ -166,9 +227,13 @@ const providers = await configureProviders()
 console.log(`Model providers: ${providers.length ? providers.join(", ") : "none added (no API keys in env)"}`)
 const tools = await configureMcp()
 console.log(`MCP server "editai" at ${MCP_URL}: ${tools.length} tools (${tools.join(", ")})`)
+const connectors = await configureConnectors()
+console.log(
+  `Extra connectors: ${connectors.length ? connectors.map((c) => `${c.name} (auth: ${c.auth})`).join(", ") : "none"}`,
+)
 const sandbox = await configureSandbox()
 console.log(`Sandbox: ${sandbox ? "Daytona configured, enabled on the agent" : "not configured (set DAYTONA_API_KEY to enable code execution and skills)"}`)
 const model = await pickModel()
-const agent = await upsertAgent(model, sandbox)
+const agent = await upsertAgent(model, sandbox, connectors)
 console.log(`Agent "${AGENT_NAME}" ${agent.updated ? "updated" : "created"} (id ${agent.id}) on model ${model}`)
 console.log(`Open ${TF} and pick "${AGENT_NAME}" in the Agents Library, or run the web app.`)

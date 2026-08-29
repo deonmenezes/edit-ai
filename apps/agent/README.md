@@ -40,6 +40,8 @@ cd ../web && bun run dev                 # http://localhost:5173
 | `OPENAI_COMPATIBLE_BASE_URL` + `_API_KEY` + `_MODELS` (+ `_NAME`) | Registers any other OpenAI-compatible endpoint: vLLM, Ollama, a gateway. |
 | `DAYTONA_API_KEY` | Configures the sandbox and enables it on the agent. |
 | `EDITAI_MODEL` | Pins the agent's model instead of picking the best configured one. |
+| `EDITAI_CONNECTORS` | Extra MCP servers to attach, comma separated. Defaults to `exa` (keyless web search). |
+| `<NAME>_MCP_HEADER` | Credential for a header-auth connector, e.g. `GITHUB_MCP_HEADER="Authorization: Bearer ghp_..."`. |
 | `TRUEFORGE_BASE_URL` | Defaults to `http://localhost:8790`. |
 | `EDITAI_AGENT_PORT` | Defaults to `8941`. |
 
@@ -73,6 +75,25 @@ Destructive tools are published with MCP's `destructiveHint` annotation. The age
 `require_approval_for_tools: ["@destructive", "export_project"]` turns that annotation into a
 pause: the harness stops the turn, the editor shows the tool and its arguments, and the run only
 continues once a person allows or denies it.
+
+## Connecting other tools
+
+`setup.ts` attaches any server from the TrueForge catalog by name, and handles all three auth
+styles:
+
+```bash
+EDITAI_CONNECTORS=exa bun run setup                    # keyless, the default
+GITHUB_MCP_HEADER="Authorization: Bearer ghp_..." \
+  EDITAI_CONNECTORS=exa,github bun run setup           # header auth
+EDITAI_CONNECTORS=exa,linear bun run setup             # OAuth
+```
+
+OAuth servers use dynamic client registration: nothing to configure here. The first time the
+agent reaches for one, the harness registers as a client, the turn pauses with an authorize URL,
+and the editor shows a **Connect** button. Verified against Linear.
+
+Extra connectors are attached read-only and deferred, so they cost nothing in context until the
+agent actually reaches for them.
 
 ## Timeline semantics worth knowing
 

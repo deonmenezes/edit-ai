@@ -29,7 +29,7 @@ server's event stream, so an edit the agent makes shows up in the UI as it happe
 
 | Capability | Where it lives |
 | --- | --- |
-| MCP tools, including your own servers and OAuth ones | `apps/agent/src/tools.ts`, registered by `apps/agent/scripts/setup.ts` |
+| MCP tools, your own and the catalog's | `apps/agent/src/tools.ts`; `setup.ts` also attaches catalog servers, including OAuth ones (verified against Linear) and keyless web search |
 | Human approvals before destructive edits | MCP `destructiveHint` annotations → `require_approval_for_tools` → the approval card in `apps/web/src/components/editor/assistant-panel.tsx` |
 | Sub-agents | Enabled on the agent; per-clip fan-out for captioning, rendered as threads in the UI |
 | Sessions that survive a reload | `apps/web/src/components/editor/use-assistant.ts` replays turns and re-attaches to a running one |
