@@ -8,6 +8,12 @@
 @theme inline {
     --font-heading: 'Playfair Display', serif;
     --font-sans: 'Inter Variable', sans-serif;
+    --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    --color-clip-video: var(--clip-video);
+    --color-clip-text: var(--clip-text);
+    --color-clip-audio: var(--clip-audio);
+    --color-panel: var(--panel);
+    --color-well: var(--well);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -115,6 +121,32 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* EditAI workspace palette: warm charcoal, off-white ink, violet accent */
+.dark {
+    --background: #141416;
+    --foreground: #ebe9e4;
+    --card: #1c1c1f;
+    --card-foreground: #ebe9e4;
+    --popover: #1c1c1f;
+    --popover-foreground: #ebe9e4;
+    --primary: #7c5cff;
+    --primary-foreground: #ffffff;
+    --secondary: #232327;
+    --secondary-foreground: #ebe9e4;
+    --muted: #232327;
+    --muted-foreground: #8a8892;
+    --accent: #26262b;
+    --accent-foreground: #ebe9e4;
+    --border: #2a2a2e;
+    --input: #2a2a2e;
+    --ring: #7c5cff;
+    --panel: #1c1c1f;
+    --well: #0e0e10;
+    --clip-video: #3aa39b;
+    --clip-text: #e0a63b;
+    --clip-audio: #5fae63;
 }
 
 @layer base {
