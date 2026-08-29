@@ -119,7 +119,16 @@ See [apps/agent/README.md](apps/agent/README.md) for the tool reference and time
 | `bun run build`     | Build every app                       |
 | `bun run deploy`    | Build and deploy to Cloudflare        |
 
-## Qodo code review evidence
+## Qodo Code Review Evidence
+
+Two pull requests were reviewed with Qodo Merge before merge:
+
+| PR | What it added | Qodo reviews | Findings |
+| --- | --- | --- | --- |
+| [#2](https://github.com/deonmenezes/edit-ai/pull/2) | ffmpeg sandbox MCP server and video-editing skill | 1 | 2 real, both fixed |
+| [#3](https://github.com/deonmenezes/edit-ai/pull/3) | EditAI on the TrueForge agent harness | 2 | 6 total: 4 fixed, 1 retracted, 1 rejected with evidence |
+
+### PR #3, first review
 
 [PR #3](https://github.com/deonmenezes/edit-ai/pull/3) was reviewed with Qodo Merge, which raised
 three issues. All three were real and all three are fixed in the PR:
@@ -138,6 +147,8 @@ three issues. All three were real and all three are fixed in the PR:
 The first finding is the one that mattered: the test suite had missed it, because the existing
 ripple-delete test asserted the buggy `c1r` id as if it were correct.
 
+### PR #3, follow-up review
+
 A second review of the updated PR raised three more. Two were real and fixed; one was checked and
 rejected:
 
@@ -151,6 +162,21 @@ rejected:
   time, and the code accepts exactly up to the limit and rejects one frame past it. Two tests now
   pin that boundary so the correct form is not "fixed" into a broken one later.
 
+### PR #2 review
+
+[PR #2](https://github.com/deonmenezes/edit-ai/pull/2) raised two, both real and both fixed:
+
+- **`run_python` could delete the source media.** The tool passed agent-supplied code straight to
+  `python3 -c`, and the argument guard could not catch it: `import shutil; shutil.rmtree('/work')`
+  contains no `..` and no leading `/`, so it passed. The container is no defence either, since the
+  workspace is exactly what it is meant to reach. The tool is now registered with
+  `destructiveHint: true`, so the harness stops and shows the script for approval first, the same
+  gate the timeline's `delete_clip` and `ripple_delete` use.
+- **The path guard rejected valid code.** Scanning a Python source string for `..` or a URL
+  rejected correct programs without adding a boundary. Path validation now applies only to
+  path-like arguments; for code payloads the container is the boundary.
+
+
 ## Contributing
 
 Issues and pull requests are welcome. See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for setup and guidelines, and open an issue first for anything larger than a bug fix.
@@ -158,11 +184,3 @@ Issues and pull requests are welcome. See [CONTRIBUTING.md](.github/CONTRIBUTING
 ## License
 
 [MIT](LICENSE)
-
-## Qodo Code Review Evidence
-
-All meaningful changes went through pull requests reviewed by Qodo before merge:
-
-- #2 — ffmpeg sandbox MCP server and video editing skill
-- #3 — Bright Data MCP integration docs
-
