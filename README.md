@@ -147,7 +147,7 @@ not estimate, and the media sandbox is for work that must reach the media files.
 
 ## Qodo Code Review Evidence
 
-Two pull requests were reviewed with Qodo Merge before merge:
+Every pull request below was reviewed by Qodo before it merged:
 
 | PR | What it added | Qodo reviews | Findings |
 | --- | --- | --- | --- |
