@@ -15,6 +15,8 @@ const here = dirname(fileURLToPath(import.meta.url))
 const TF = (process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790").replace(/\/$/, "")
 const MCP_URL = process.env.EDITAI_MCP_URL ?? `http://localhost:${process.env.EDITAI_AGENT_PORT ?? 8941}/mcp`
 const AGENT_NAME = process.env.EDITAI_AGENT_NAME ?? "editai"
+const SKILL_REPO = process.env.EDITAI_SKILL_REPO ?? "https://github.com/deonmenezes/edit-ai"
+const SKILL_REF = process.env.EDITAI_SKILL_REF ?? "main"
 /** Catalog connectors to attach alongside the timeline tools. Keyless by default. */
 const CONNECTORS = (process.env.EDITAI_CONNECTORS ?? "exa")
   .split(",")
@@ -162,6 +164,29 @@ async function configureConnectors(): Promise<{ name: string; auth: string }[]> 
   return attached
 }
 
+/**
+ * Skills live in this repo, so the harness fetches them from git rather than a local path:
+ * a remote TrueForge cannot read this machine's disk. PUT is an upsert, POST is not, so a
+ * second `bun run setup` refreshes the pin instead of failing on the duplicate name.
+ */
+async function configureSkills(): Promise<string[]> {
+  const skills = [
+    {
+      type: "git",
+      name: "video-editing",
+      url: SKILL_REPO,
+      path: "skills/video-editing",
+      ref: SKILL_REF,
+      description:
+        "Recipes and rules for cutting, cropping, captioning, and normalizing video with ffmpeg " +
+        "inside the ffmpeg-sandbox connector. Load this whenever a task involves editing, " +
+        "trimming, resizing, or exporting video or audio.",
+    },
+  ]
+  for (const manifest of skills) await api("PUT", "/settings/skills", { manifest })
+  return skills.map((s) => s.name)
+}
+
 async function configureSandbox(): Promise<boolean> {
   if (!process.env.DAYTONA_API_KEY) {
     try {
@@ -247,6 +272,8 @@ const connectors = await configureConnectors()
 console.log(
   `Extra connectors: ${connectors.length ? connectors.map((c) => `${c.name} (auth: ${c.auth})`).join(", ") : "none"}`,
 )
+const skills = await configureSkills()
+console.log(`Skills: ${skills.join(", ")} (from ${SKILL_REPO}@${SKILL_REF})`)
 const sandbox = await configureSandbox()
 console.log(`Sandbox: ${sandbox ? "Daytona configured, enabled on the agent" : "not configured (set DAYTONA_API_KEY to enable code execution and skills)"}`)
 const model = await pickModel()
