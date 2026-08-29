@@ -42,7 +42,7 @@ apps/
 
 ## Contributing
 
-Issues and pull requests are welcome. Please open an issue first for anything larger than a bug fix.
+Issues and pull requests are welcome. See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for setup and guidelines, and open an issue first for anything larger than a bug fix.
 
 ## License
 
