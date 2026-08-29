@@ -1,6 +1,15 @@
 # Bright Data integration
 
-Attached to TrueForge as a catalog MCP connector: https://mcp.brightdata.com/mcp
+Available as a TrueForge catalog MCP connector: https://mcp.brightdata.com/mcp
+
+**Status: not attached in this checkout.** `bright-data` is header auth, and
+setup skips it when `BRIGHT_DATA_MCP_HEADER` is unset, so a clone of this repo
+runs with `exa` as its only research connector. Everything below is the path to
+turn it on, not a description of a running system. Check before you rely on it:
+
+```bash
+curl -s localhost:8790/api/v1/settings/mcp-servers | jq -r '.data[].name'
+```
 
 Auth: API Key (account API token from Bright Data Settings -> API tokens).
 Note: the endpoint advertises OAuth metadata, but the account API token works.
@@ -32,7 +41,7 @@ registered but every tool call will fail at run time.
 Like the other extra connectors it attaches read-only and deferred, so it costs
 no context until the agent reaches for it.
 
-## How the agent uses it
+## How the agent uses it, once attached
 
 Before naming or ordering clips, the agent researches how comparable short-form
 videos are titled, then applies those patterns. Live web data feeds the edit
