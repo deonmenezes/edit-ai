@@ -154,6 +154,12 @@ Qodo posts its verdict as an issue comment. It publishes no check run, no commit
 status and no approving review, so GitHub's own auto-merge has nothing to gate
 on. `.github/workflows/qodo-automerge.yml` is that missing gate.
 
+It listens for edited comments as well as created ones, because Qodo posts a
+placeholder and then edits the verdict into that same comment: a gate watching
+only for new comments never sees a verdict at all. On an edited event
+`comment.user` is still the bot even when a person did the editing, so the
+sender is checked too.
+
 It fails closed in every direction, because the first draft did not and Qodo
 said so. It reads only the structured counter chips, never the prose: Qodo
 quotes findings and diff hunks verbatim, so the words "no issues found" appear
