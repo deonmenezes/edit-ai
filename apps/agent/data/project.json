@@ -1,0 +1,337 @@
+{
+  "name": "Untitled project",
+  "fps": 30,
+  "duration": 21.1,
+  "tracks": [
+    {
+      "id": "v1",
+      "label": "V1",
+      "kind": "video"
+    },
+    {
+      "id": "t1",
+      "label": "T1",
+      "kind": "text"
+    },
+    {
+      "id": "a1",
+      "label": "A1",
+      "kind": "audio"
+    },
+    {
+      "id": "a2",
+      "label": "A2",
+      "kind": "audio"
+    },
+    {
+      "id": "t2",
+      "label": "T2",
+      "kind": "text"
+    }
+  ],
+  "clips": [
+    {
+      "id": "c1",
+      "name": "intro.mp4",
+      "kind": "video",
+      "trackId": "v1",
+      "start": 0,
+      "duration": 3.2,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c1r",
+      "name": "intro.mp4",
+      "kind": "video",
+      "trackId": "v1",
+      "start": 3.2,
+      "duration": 0.9,
+      "sourceOffset": 4.1
+    },
+    {
+      "id": "c2",
+      "name": "b-roll.mp4",
+      "kind": "video",
+      "trackId": "v1",
+      "start": 4.1,
+      "duration": 4.6,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c2r",
+      "name": "b-roll.mp4",
+      "kind": "video",
+      "trackId": "v1",
+      "start": 8.7,
+      "duration": 0.6,
+      "sourceOffset": 5.4
+    },
+    {
+      "id": "c3",
+      "name": "talking-head.mp4",
+      "kind": "video",
+      "trackId": "v1",
+      "start": 9.3,
+      "duration": 5.8,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c3r",
+      "name": "talking-head.mp4",
+      "kind": "video",
+      "trackId": "v1",
+      "start": 15.1,
+      "duration": 6,
+      "sourceOffset": 7
+    },
+    {
+      "id": "c4",
+      "name": "Hook line",
+      "kind": "text",
+      "trackId": "t1",
+      "start": 0.5,
+      "duration": 2.7,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c5",
+      "name": "Subscribe",
+      "kind": "text",
+      "trackId": "t1",
+      "start": 17.1,
+      "duration": 4,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c6",
+      "name": "voiceover.wav",
+      "kind": "audio",
+      "trackId": "a1",
+      "start": 0,
+      "duration": 3.2,
+      "sourceOffset": 0,
+      "volume": 100
+    },
+    {
+      "id": "c6r",
+      "name": "voiceover.wav",
+      "kind": "audio",
+      "trackId": "a1",
+      "start": 3.2,
+      "duration": 5.5,
+      "sourceOffset": 4.1,
+      "volume": 100
+    },
+    {
+      "id": "c6r",
+      "name": "voiceover.wav",
+      "kind": "audio",
+      "trackId": "a1",
+      "start": 8.7,
+      "duration": 6.4,
+      "sourceOffset": 10.4,
+      "volume": 100
+    },
+    {
+      "id": "c6r",
+      "name": "voiceover.wav",
+      "kind": "audio",
+      "trackId": "a1",
+      "start": 15.1,
+      "duration": 6,
+      "sourceOffset": 18,
+      "volume": 100
+    },
+    {
+      "id": "c7",
+      "name": "music.mp3",
+      "kind": "audio",
+      "trackId": "a2",
+      "start": 0,
+      "duration": 3.2,
+      "sourceOffset": 0,
+      "volume": 35
+    },
+    {
+      "id": "c7r",
+      "name": "music.mp3",
+      "kind": "audio",
+      "trackId": "a2",
+      "start": 3.2,
+      "duration": 5.5,
+      "sourceOffset": 4.1,
+      "volume": 35
+    },
+    {
+      "id": "c7r",
+      "name": "music.mp3",
+      "kind": "audio",
+      "trackId": "a2",
+      "start": 8.7,
+      "duration": 6.4,
+      "sourceOffset": 10.4,
+      "volume": 35
+    },
+    {
+      "id": "c7r",
+      "name": "music.mp3",
+      "kind": "audio",
+      "trackId": "a2",
+      "start": 15.1,
+      "duration": 6,
+      "sourceOffset": 18,
+      "volume": 35
+    },
+    {
+      "id": "c8",
+      "name": "Most editors waste hours on cuts a machine should make.",
+      "kind": "text",
+      "trackId": "t2",
+      "start": 0.4,
+      "duration": 2.7,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c9",
+      "name": "EditAI reads your timeline and does the boring parts.",
+      "kind": "text",
+      "trackId": "t2",
+      "start": 3.3,
+      "duration": 0.8,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c10",
+      "name": "EditAI reads your timeline and does the boring parts.",
+      "kind": "text",
+      "trackId": "t2",
+      "start": 4.1,
+      "duration": 2.5,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c11",
+      "name": "Silences, captions, pacing.",
+      "kind": "text",
+      "trackId": "t2",
+      "start": 6.7,
+      "duration": 1.9,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c12",
+      "name": "You describe the change, it edits, you approve.",
+      "kind": "text",
+      "trackId": "t2",
+      "start": 8.8,
+      "duration": 0.5,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c13",
+      "name": "You describe the change, it edits, you approve.",
+      "kind": "text",
+      "trackId": "t2",
+      "start": 9.3,
+      "duration": 3,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c14",
+      "name": "Every destructive step waits for a human.",
+      "kind": "text",
+      "trackId": "t2",
+      "start": 12.4,
+      "duration": 2.6,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c15",
+      "name": "It runs on any model and any tools you plug in.",
+      "kind": "text",
+      "trackId": "t2",
+      "start": 15.2,
+      "duration": 2.9,
+      "sourceOffset": 0
+    },
+    {
+      "id": "c16",
+      "name": "Subscribe if you want to see where this goes.",
+      "kind": "text",
+      "trackId": "t2",
+      "start": 18.3,
+      "duration": 2.4,
+      "sourceOffset": 0
+    }
+  ],
+  "media": {
+    "intro.mp4": {
+      "duration": 5
+    },
+    "b-roll.mp4": {
+      "duration": 6
+    },
+    "talking-head.mp4": {
+      "duration": 13
+    },
+    "voiceover.wav": {
+      "duration": 24,
+      "silences": [
+        {
+          "start": 3.2,
+          "end": 4.1
+        },
+        {
+          "start": 9.6,
+          "end": 10.4
+        },
+        {
+          "start": 16.8,
+          "end": 18
+        }
+      ],
+      "transcript": [
+        {
+          "start": 0.4,
+          "end": 3.1,
+          "text": "Most editors waste hours on cuts a machine should make."
+        },
+        {
+          "start": 4.2,
+          "end": 7.5,
+          "text": "EditAI reads your timeline and does the boring parts."
+        },
+        {
+          "start": 7.6,
+          "end": 9.5,
+          "text": "Silences, captions, pacing."
+        },
+        {
+          "start": 10.5,
+          "end": 14,
+          "text": "You describe the change, it edits, you approve."
+        },
+        {
+          "start": 14.1,
+          "end": 16.7,
+          "text": "Every destructive step waits for a human."
+        },
+        {
+          "start": 18.1,
+          "end": 21,
+          "text": "It runs on any model and any tools you plug in."
+        },
+        {
+          "start": 21.2,
+          "end": 23.6,
+          "text": "Subscribe if you want to see where this goes."
+        }
+      ]
+    },
+    "music.mp3": {
+      "duration": 24,
+      "bpm": 120
+    }
+  },
+  "exports": []
+}

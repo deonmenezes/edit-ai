@@ -44,8 +44,11 @@ function assertSafeArgs(args) {
   }
 }
 
-function runInSandbox(binary, args) {
-  assertSafeArgs(args);
+// `validatePaths` is off for payloads that are code rather than paths. Inside the container
+// only /work is mounted and there is no network, so scanning a Python source string for ".."
+// or a URL rejects valid code without adding a boundary: the container is the boundary.
+function runInSandbox(binary, args, { validatePaths = true } = {}) {
+  if (validatePaths) assertSafeArgs(args);
 
   const dockerArgs = [
     "run", "--rm",
@@ -150,11 +153,25 @@ function buildServer() {
     }
   );
 
-  server.tool(
+  // Arbitrary Python with the workspace mounted read-write can overwrite or delete source
+  // media, which the container cannot prevent. Marking it destructive makes the harness stop
+  // and show the script for approval before it runs, the same gate the timeline's
+  // delete/ripple tools use.
+  server.registerTool(
     "run_python",
-    "Run a short Python script inside the sandbox for analysis or file wrangling. Same isolation as ffmpeg: no network, workspace only.",
-    { code: z.string().describe("Python source to execute") },
-    async ({ code }) => asText(await runInSandbox("python3", ["-c", code]))
+    {
+      title: "Run Python in the sandbox",
+      description:
+        "Run a short Python script inside the sandbox for analysis or file wrangling. Same isolation as ffmpeg: no network, workspace only. It can write and delete files in the workspace, so it asks for approval first.",
+      inputSchema: { code: z.string().describe("Python source to execute") },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async ({ code }) => asText(await runInSandbox("python3", ["-c", code], { validatePaths: false }))
   );
 
   return server;
