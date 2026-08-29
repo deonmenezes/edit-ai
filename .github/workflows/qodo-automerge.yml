@@ -2,8 +2,10 @@ name: Qodo auto-merge
 
 # Qodo posts its verdict as an issue comment. It publishes no check run, no
 # commit status and no approving review, so GitHub's own auto-merge has nothing
-# to gate on. This workflow is that missing gate: it reads the verdict Qodo
-# actually emits and merges only on a clean one.
+# to gate on. This workflow is that missing gate.
+#
+# It fails closed everywhere: an unreadable verdict, a review of a commit that is
+# no longer the head, or any error reading check state all end in "do not merge".
 on:
   issue_comment:
     types: [created]
@@ -15,46 +17,67 @@ permissions:
 
 jobs:
   merge-on-clean-review:
-    # issue_comment fires for issues too, so confirm this is a PR, and that the
-    # comment is Qodo's own. Checking the bot id as well as the login matters:
-    # a login is display text a human account could imitate, the id cannot be.
+    # issue_comment fires for issues too, so confirm this is a PR and that the
+    # comment is Qodo's own. The bot type is checked as well as the login,
+    # because a login is display text an account could imitate.
     if: >
       github.event.issue.pull_request != null &&
       github.event.comment.user.login == 'qodo-code-review[bot]' &&
       github.event.comment.user.type == 'Bot'
     runs-on: ubuntu-latest
     steps:
-      - name: Read the verdict
+      - name: Read the verdict and the commit it applies to
         id: verdict
         env:
           BODY: ${{ github.event.comment.body }}
         run: |
-          # Two shapes mean the same thing: the explicit all-clear, or all three
-          # counters at zero. Anything else, including a body we cannot parse,
-          # is treated as "not clean" so an unreadable review never merges.
-          clean=false
-          if grep -qF 'no issues found' <<<"$BODY"; then
-            clean=true
-          elif grep -qE 'Bugs \(0\)' <<<"$BODY" \
-            && grep -qE 'Rule violations \(0\)' <<<"$BODY" \
-            && grep -qE 'Requirement gaps \(0\)' <<<"$BODY"; then
-            clean=true
-          fi
-          echo "clean=$clean" >> "$GITHUB_OUTPUT"
-          echo "Qodo verdict clean: $clean"
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os, re
 
-      - name: Merge
+          body = os.environ["BODY"]
+
+          # Parse only the structured counters Qodo renders as <code> chips, never
+          # free text. Qodo quotes findings and diff hunks verbatim, so a phrase
+          # like "no issues found" appears inside the body of reviews that are not
+          # clean, and any substring test on the whole comment is forgeable by the
+          # PR's own content.
+          counters = re.findall(r"<code>[^<]*?\((\d+)\)</code>", body)
+
+          # The third chip is named differently across review types ("Requirement
+          # gaps", "Skill insights"), so require the one that is always present
+          # rather than a fixed set.
+          has_bugs = re.search(r"<code>[^<]*Bugs \(\d+\)</code>", body) is not None
+
+          clean = bool(counters) and has_bugs and all(c == "0" for c in counters)
+
+          # Bind the verdict to the revision Qodo actually read. Qodo footers the
+          # comment with the reviewed commit; with no such marker there is no
+          # verifiable revision identity and this must not merge.
+          m = re.search(r"/commit/([0-9a-f]{40})", body)
+          sha = m.group(1) if m else ""
+
+          print(f"clean={'true' if (clean and sha) else 'false'}")
+          print(f"reviewed_sha={sha}")
+          print(f"counters={','.join(counters) if counters else 'none'}")
+          PY
+          echo "Parsed verdict -> clean=${{ steps.verdict.outputs.clean }}" || true
+
+      - name: Merge the reviewed commit
         if: steps.verdict.outputs.clean == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
+          REVIEWED_SHA: ${{ steps.verdict.outputs.reviewed_sha }}
+          REQUIRED_CHECK: build
         run: |
           set -euo pipefail
 
-          state=$(gh pr view "$PR" --repo "$REPO" \
-            --json state,isDraft,mergeable --jq '[.state,.isDraft,.mergeable]|@tsv')
-          IFS=$'\t' read -r pr_state is_draft mergeable <<<"$state"
+          read -r pr_state is_draft mergeable head_sha < <(
+            gh pr view "$PR" --repo "$REPO" \
+              --json state,isDraft,mergeable,headRefOid \
+              --jq '[.state,.isDraft,.mergeable,.headRefOid]|@tsv'
+          )
 
           if [ "$pr_state" != "OPEN" ] || [ "$is_draft" = "true" ]; then
             echo "PR is $pr_state (draft=$is_draft); nothing to merge."; exit 0
@@ -63,27 +86,45 @@ jobs:
             echo "PR is $mergeable; a human should resolve this."; exit 0
           fi
 
-          # A clean review is not a green build. Qodo reads the diff; it does not
-          # run the tests, so the build still has to pass on its own.
-          failed=$(gh pr checks "$PR" --repo "$REPO" --json name,state \
-            --jq '[.[] | select(.state == "FAILURE" or .state == "ERROR" or .state == "CANCELLED")] | length' 2>/dev/null || echo 0)
-          pending=$(gh pr checks "$PR" --repo "$REPO" --json name,state \
-            --jq '[.[] | select(.state == "PENDING" or .state == "IN_PROGRESS" or .state == "QUEUED")] | length' 2>/dev/null || echo 0)
-
-          if [ "$failed" != "0" ]; then
-            echo "$failed check(s) failing; refusing to merge."; exit 0
+          # The review applies to one revision. issue_comment runs against the
+          # default branch, so nothing about this event ties it to the PR head:
+          # if a commit landed after the review, the head is unreviewed code.
+          if [ "$head_sha" != "$REVIEWED_SHA" ]; then
+            echo "Qodo reviewed $REVIEWED_SHA but the head is now $head_sha."
+            echo "Refusing to merge code that was never reviewed."
+            exit 0
           fi
-          if [ "$pending" != "0" ]; then
-            # Native --auto is not available: the repository has allow_auto_merge
-            # off, and turning it on is a repo-wide setting this workflow has no
-            # business changing. Wait for the checks instead, bounded, and let the
-            # job fail loudly if they fail.
-            echo "$pending check(s) still running; waiting."
-            if ! timeout 900 gh pr checks "$PR" --repo "$REPO" --watch --fail-fast; then
-              echo "Checks did not all pass within the wait; refusing to merge."
-              exit 0
+
+          # Check state is read for the reviewed SHA, and a failure to read it is
+          # an error rather than an absence of problems. Collapsing both into "0
+          # failures" would let an outage authorise the merge.
+          if ! runs=$(gh api "repos/$REPO/commits/$REVIEWED_SHA/check-runs" --paginate \
+                        --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion // "none")"'); then
+            echo "Could not read check runs for $REVIEWED_SHA; refusing to merge."
+            exit 1
+          fi
+
+          deadline=$(( SECONDS + 900 ))
+          while :; do
+            if grep -qP "^\Q$REQUIRED_CHECK\E\tcompleted\tsuccess$" <<<"$runs"; then
+              break
             fi
-          fi
+            if grep -qP "^\Q$REQUIRED_CHECK\E\tcompleted\t(failure|cancelled|timed_out|action_required)$" <<<"$runs"; then
+              echo "Required check '$REQUIRED_CHECK' did not pass; refusing to merge."; exit 0
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Required check '$REQUIRED_CHECK' did not complete in time; refusing to merge."; exit 0
+            fi
+            echo "Waiting for '$REQUIRED_CHECK' on $REVIEWED_SHA."
+            sleep 20
+            if ! runs=$(gh api "repos/$REPO/commits/$REVIEWED_SHA/check-runs" --paginate \
+                          --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion // "none")"'); then
+              echo "Could not re-read check runs; refusing to merge."; exit 1
+            fi
+          done
 
-          gh pr merge "$PR" --repo "$REPO" --merge
-          echo "Merged #$PR on a clean Qodo review."
+          # --match-head-commit makes the revision check atomic: if anything is
+          # pushed between the comparison above and this call, the merge is
+          # rejected by GitHub rather than racing.
+          gh pr merge "$PR" --repo "$REPO" --merge --match-head-commit "$REVIEWED_SHA"
+          echo "Merged #$PR at $REVIEWED_SHA on a clean Qodo review."
