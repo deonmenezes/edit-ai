@@ -66,6 +66,7 @@ server's event stream, so an edit the agent makes shows up in the UI as it happe
 | Human approvals before destructive edits | MCP `destructiveHint` annotations → `require_approval_for_tools` → the approval card in `apps/web/src/components/editor/assistant-panel.tsx` |
 | Sub-agents | Enabled on the agent; per-clip fan-out for captioning, rendered as threads in the UI |
 | Sessions that survive a reload | `apps/web/src/components/editor/use-assistant.ts` replays turns and re-attaches to a running one |
+| Live web research | `bright-data` connector: `search_engine` and `scrape_as_markdown`, attached deferred so it costs no context until a task needs it (see [docs/brightdata.md](docs/brightdata.md)) |
 | Any model provider | `apps/agent/scripts/setup.ts` registers whichever API keys are present, including any OpenAI-compatible endpoint |
 | Sandboxed execution | Two layers: the harness sandbox (Daytona, configured automatically when `DAYTONA_API_KEY` is set) for general code, and `packages/ffmpeg-sandbox` for media work |
 

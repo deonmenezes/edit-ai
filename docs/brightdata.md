@@ -2,13 +2,14 @@
 
 Available as a TrueForge catalog MCP connector: https://mcp.brightdata.com/mcp
 
-**Status: not attached in this checkout.** `bright-data` is header auth, and
-setup skips it when `BRIGHT_DATA_MCP_HEADER` is unset, so a clone of this repo
-runs with `exa` as its only research connector. Everything below is the path to
-turn it on, not a description of a running system. Check before you rely on it:
+**Status: attached and authenticated.** Verified against the running harness,
+where `bright-data` reports `auth_status.status: "authenticated"` and its five
+tools reach the agent. It is header auth, so a clone still needs its own token:
+setup skips the connector when `BRIGHT_DATA_MCP_HEADER` is unset, leaving `exa`
+as the only research connector. Check rather than assume:
 
 ```bash
-curl -s localhost:8790/api/v1/settings/mcp-servers | jq -r '.data[].name'
+curl -s localhost:8790/api/v1/settings/mcp-servers | jq '.data[] | {name, auth_status}'
 ```
 
 Auth: API Key (account API token from Bright Data Settings -> API tokens).
@@ -41,7 +42,7 @@ registered but every tool call will fail at run time.
 Like the other extra connectors it attaches read-only and deferred, so it costs
 no context until the agent reaches for it.
 
-## How the agent uses it, once attached
+## How the agent uses it
 
 Before naming or ordering clips, the agent researches how comparable short-form
 videos are titled, then applies those patterns. Live web data feeds the edit
@@ -62,3 +63,24 @@ treats an empty or obviously truncated scrape as a failed research step and says
 the research failed, rather than titling clips from a half-scraped page. That is
 the property worth keeping: a site that changes shape costs quality, never
 correctness.
+
+## Verified run
+
+The agent reached for it unprompted by any tool preloading, because the
+connector attaches deferred: it discovers the tools only when a task needs
+research, so they cost no context until then.
+
+```
+list_tools      {"mcp_server":"bright-data"}
+                -> ask_brightdata_assistant, search_engine, scrape_as_markdown,
+                   search_engine_batch, scrape_batch
+get_tool_info   {"tool_name":"search_engine","mcp_server":"bright-data"}
+call_tool       {"tool_name":"search_engine",
+                 "input":{"query":"best short form video hooks 2026"}}
+                -> live SERP results
+```
+
+The harness wraps the scraped payload in a security notice marking it untrusted
+external data rather than instructions, so a page cannot talk the agent into
+running a tool call. Scraped text is evidence for a titling decision, never a
+command.
