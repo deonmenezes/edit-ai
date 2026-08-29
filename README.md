@@ -67,7 +67,7 @@ server's event stream, so an edit the agent makes shows up in the UI as it happe
 | Sub-agents | Enabled on the agent; per-clip fan-out for captioning, rendered as threads in the UI |
 | Sessions that survive a reload | `apps/web/src/components/editor/use-assistant.ts` replays turns and re-attaches to a running one |
 | Any model provider | `apps/agent/scripts/setup.ts` registers whichever API keys are present, including any OpenAI-compatible endpoint |
-| Sandboxed execution | Configured automatically when `DAYTONA_API_KEY` is set |
+| Sandboxed execution | Two layers: the harness sandbox (Daytona, configured automatically when `DAYTONA_API_KEY` is set) for general code, and `packages/ffmpeg-sandbox` for media work |
 
 ## Getting started
 
@@ -118,6 +118,32 @@ See [apps/agent/README.md](apps/agent/README.md) for the tool reference and time
 | `bun run dev:web`   | Run only the web app                  |
 | `bun run build`     | Build every app                       |
 | `bun run deploy`    | Build and deploy to Cloudflare        |
+
+## Sandboxed execution
+
+Generated code never runs on the host. Two layers cover the two kinds of work.
+
+**Harness sandbox (Daytona).** `setup.ts` registers the provider when
+`DAYTONA_API_KEY` is present, and the agent's `exec` tool then runs in a remote
+sandbox. Verified end to end against the running harness:
+
+```
+sandbox.created   sandbox_id: v1:daytona:default.e17058ee-...
+exec              python3 -c "print(sum(int(x)**2 for x in range(1,101)))"
+tool.response     {"success":true,"response":{"exitCode":0,"result":"338350\n"}}
+```
+
+**Media sandbox (`packages/ffmpeg-sandbox`).** ffmpeg and ffprobe are not safe to
+point at agent-supplied arguments on the host, so every invocation runs in a
+throwaway container: `--network none`, capped memory and CPU, `--pids-limit 256`,
+a non-root user, a single mounted workspace, and a hard timeout. `run_python`
+there is annotated `destructiveHint: true`, so the harness shows the script and
+waits for approval before it runs, because a script with the workspace mounted
+read-write can delete the source media and the container is not a defence
+against that.
+
+The split is deliberate: the harness sandbox is for computation the agent should
+not estimate, and the media sandbox is for work that must reach the media files.
 
 ## Qodo Code Review Evidence
 
