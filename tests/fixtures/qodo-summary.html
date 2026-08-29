@@ -1,0 +1,137 @@
+<h3>PR Summary by Qodo</h3>
+
+Handle edited Qodo verdict comments in the auto-merge gate
+
+<code>🐞 Bug fix</code> <code>⚙️ Configuration changes</code> <code>📝 Documentation</code> <code>🕐 Less than 10 minutes</code>
+
+<img src="https://www.qodo.ai/wp-content/uploads/2025/11/light-grey-line.svg" height="10%" alt="Grey Divider">
+
+<details>
+<summary>AI Description</summary>
+
+<dl>
+<dd>
+<br/>
+
+><pre>
+>• Trigger the auto-merge gate when Qodo edits its placeholder with a verdict.
+>• Require Qodo as both comment author and event sender before processing.
+>• Document why edited events and sender verification are necessary.
+></pre>
+
+</dd>
+</dl>
+
+</details>
+
+<details>
+<summary>Diagram</summary>
+
+<dl>
+<dd>
+
+<br/>
+
+```mermaid
+sequenceDiagram
+  actor Qodo
+  participant GitHub
+  participant Gate as Auto-merge gate
+  participant Merge as Merge job
+  Qodo->>GitHub: Create placeholder
+  GitHub->>Gate: created event
+  Gate-->>GitHub: No verdict
+  Qodo->>GitHub: Edit with verdict
+  GitHub->>Gate: edited event
+  Gate->>Gate: Verify author and sender
+  Gate->>Merge: Clean reviewed verdict
+  Merge->>GitHub: Merge matching head
+```
+
+</dd>
+</dl>
+
+</details>
+
+
+
+
+<details>
+<summary>High-Level Assessment</summary>
+
+<dl>
+<dd>
+
+<br/>
+
+>Listening to both lifecycle events is the smallest reliable fix because Qodo publishes its verdict by editing the original placeholder. Polling comments or replacing the integration with a check-run bridge would add latency and operational complexity, while sender validation safely addresses the new edited-event trust ambiguity.
+
+</dd>
+</dl>
+
+</details>
+
+<details>
+<summary> Files changed (2) <code> +16 / -3 </code> </summary>
+
+<dl>
+<dd>
+
+<br/>
+
+<details>
+<summary>Bug fix (1) <code> +10 / -3 </code></summary>
+
+<dl>
+<dd>
+
+<details>
+<summary>qodo-automerge.yml<code>Process edited Qodo verdict comments securely</code> <code>+10/-3</code></summary>
+
+<br/>
+
+>Process edited Qodo verdict comments securely
+>
+><pre>
+>• Adds edited issue comments to the workflow trigger so Qodo&#x27;s final verdict reaches the merge gate. Requires the event sender to be Qodo in addition to validating the comment owner and bot account type, preventing human edits from being treated as bot-authored verdicts.
+></pre>
+>
+><a href='https://github.com/deonmenezes/edit-ai/pull/16/files#diff-08f97bc772f762f2b8b6047c4b37dc1f1c57672ffcb6333f0a077879ea3a9d32'>.github/workflows/qodo-automerge.yml</a>
+
+</details>
+
+</dd>
+</dl>
+
+</details>
+
+<details>
+<summary>Documentation (1) <code> +6 / -0 </code></summary>
+
+<dl>
+<dd>
+
+<details>
+<summary>README.md<code>Document edited-verdict event handling</code> <code>+6/-0</code></summary>
+
+<br/>
+
+>Document edited-verdict event handling
+>
+><pre>
+>• Explains Qodo&#x27;s placeholder-then-edit behavior and why the auto-merge workflow checks both the comment owner and the editor identity.
+></pre>
+>
+><a href='https://github.com/deonmenezes/edit-ai/pull/16/files#diff-b335630551682c19a781afebcf4d07bf978fb1f8ac04c6bf87428ed5106870f5'>README.md</a>
+
+</details>
+
+</dd>
+</dl>
+
+</details>
+
+</dd>
+</dl>
+
+</details>

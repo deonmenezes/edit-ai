@@ -33,41 +33,17 @@ jobs:
       github.event.sender.login == 'qodo-code-review[bot]'
     runs-on: ubuntu-latest
     steps:
+      # issue_comment runs against the default branch, which is where the
+      # parser lives; the pull request's own copy is deliberately not used, so a
+      # pull request cannot change the rules that decide whether it merges.
+      - name: Check out the parser
+        uses: actions/checkout@v4
+
       - name: Read the verdict and the commit it applies to
         id: verdict
         env:
           BODY: ${{ github.event.comment.body }}
-        run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import os, re
-
-          body = os.environ["BODY"]
-
-          # Parse only the structured counters Qodo renders as <code> chips, never
-          # free text. Qodo quotes findings and diff hunks verbatim, so a phrase
-          # like "no issues found" appears inside the body of reviews that are not
-          # clean, and any substring test on the whole comment is forgeable by the
-          # PR's own content.
-          counters = re.findall(r"<code>[^<]*?\((\d+)\)</code>", body)
-
-          # The third chip is named differently across review types ("Requirement
-          # gaps", "Skill insights"), so require the one that is always present
-          # rather than a fixed set.
-          has_bugs = re.search(r"<code>[^<]*Bugs \(\d+\)</code>", body) is not None
-
-          clean = bool(counters) and has_bugs and all(c == "0" for c in counters)
-
-          # Bind the verdict to the revision Qodo actually read. Qodo footers the
-          # comment with the reviewed commit; with no such marker there is no
-          # verifiable revision identity and this must not merge.
-          m = re.search(r"/commit/([0-9a-f]{40})", body)
-          sha = m.group(1) if m else ""
-
-          print(f"clean={'true' if (clean and sha) else 'false'}")
-          print(f"reviewed_sha={sha}")
-          print(f"counters={','.join(counters) if counters else 'none'}")
-          PY
-          echo "Parsed verdict -> clean=${{ steps.verdict.outputs.clean }}" || true
+        run: python3 .github/scripts/qodo_verdict.py >> "$GITHUB_OUTPUT"
 
       - name: Merge the reviewed commit
         if: steps.verdict.outputs.clean == 'true'
