@@ -4,8 +4,8 @@ import type { ProjectStore } from "./project.ts"
 
 /**
  * The MCP SDK infers each handler's argument type from its zod shape. That inference is
- * pathological under TypeScript 6 — it exhausts the compiler heap on a schema set this
- * size — so tools are registered through a narrow facade and every handler annotates its
+ * pathological under TypeScript 6: it exhausts the compiler heap on a schema set this
+ * size, so tools are registered through a narrow facade and every handler annotates its
  * own arguments instead. Runtime behavior is unchanged; the zod schemas still validate.
  */
 type ToolResult = { isError?: boolean; content: { type: "text"; text: string }[] }
