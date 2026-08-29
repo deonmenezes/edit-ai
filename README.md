@@ -156,6 +156,10 @@ on. `.github/workflows/qodo-automerge.yml` is that missing gate: it reads the
 verdict Qodo actually emits and merges only when the review is clean, the build
 is green and the branch is mergeable.
 
+It waits for a build still in flight rather than enabling GitHub's native
+auto-merge, because that is a repository-wide setting a workflow should not turn
+on for everything else in passing.
+
 It refuses to merge on anything it cannot read. A body that matches neither the
 all-clear nor three zero counters counts as not clean, so a parsing change on
 Qodo's side stalls the merge instead of waving it through.

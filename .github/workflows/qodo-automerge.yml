@@ -74,10 +74,15 @@ jobs:
             echo "$failed check(s) failing; refusing to merge."; exit 0
           fi
           if [ "$pending" != "0" ]; then
-            # Hand off to GitHub rather than polling: it merges when checks land.
-            echo "$pending check(s) still running; enabling native auto-merge."
-            gh pr merge "$PR" --repo "$REPO" --merge --auto
-            exit 0
+            # Native --auto is not available: the repository has allow_auto_merge
+            # off, and turning it on is a repo-wide setting this workflow has no
+            # business changing. Wait for the checks instead, bounded, and let the
+            # job fail loudly if they fail.
+            echo "$pending check(s) still running; waiting."
+            if ! timeout 900 gh pr checks "$PR" --repo "$REPO" --watch --fail-fast; then
+              echo "Checks did not all pass within the wait; refusing to merge."
+              exit 0
+            fi
           fi
 
           gh pr merge "$PR" --repo "$REPO" --merge
