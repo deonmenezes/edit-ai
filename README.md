@@ -158,3 +158,11 @@ Issues and pull requests are welcome. See [CONTRIBUTING.md](.github/CONTRIBUTING
 ## License
 
 [MIT](LICENSE)
+
+## Qodo Code Review Evidence
+
+All meaningful changes went through pull requests reviewed by Qodo before merge:
+
+- #2 — ffmpeg sandbox MCP server and video editing skill
+- #3 — Bright Data MCP integration docs
+
