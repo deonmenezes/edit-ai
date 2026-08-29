@@ -2,7 +2,8 @@ import { AlertTriangle, Check, Loader2, RotateCcw, Sparkles, Square, Wrench, X }
 import { useEffect, useRef, useState } from "react"
 import { Button } from "#/components/ui/button"
 import { cn } from "#/lib/utils"
-import type { AssistantState, ChatItem, PendingApproval, PendingQuestion } from "./use-assistant"
+import type { ChatItem, PendingApproval, PendingQuestion } from "./transcript"
+import type { AssistantState } from "./use-assistant"
 
 type Props = {
   assistant: AssistantState & {

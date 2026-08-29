@@ -9,7 +9,7 @@
     "dev": "vite dev --port 5173",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run --config vitest.config.ts",
     "deploy": "bun run build && wrangler deploy"
   },
   "dependencies": {

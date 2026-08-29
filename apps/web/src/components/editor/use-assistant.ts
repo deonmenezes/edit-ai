@@ -1,18 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { trueforge, TrueForgeError, type TFEvent, type TurnInput } from "#/lib/trueforge"
+import {
+  Transcript,
+  type ChatItem,
+  type PendingApproval,
+  type PendingAuth,
+  type PendingQuestion,
+} from "./transcript"
 
-export type ToolCall = { id: string; name: string; args: string }
-
-export type ChatItem =
-  | { kind: "user"; id: string; text: string }
-  | { kind: "assistant"; id: string; threadId: string; text: string; toolCalls: ToolCall[] }
-  | { kind: "tool"; id: string; threadId: string; toolCallId: string; name: string; content: string }
-  | { kind: "thread"; id: string; threadId: string; title: string; done: boolean }
-  | { kind: "note"; id: string; text: string }
-
-export type PendingApproval = { threadId: string; toolCallId: string; name: string; args: string }
-export type PendingQuestion = { threadId: string; toolCallId: string; question: string; options: string[] }
-export type PendingAuth = { name: string; authUrl: string }
+export type { ChatItem, PendingApproval, PendingAuth, PendingQuestion, ToolCall } from "./transcript"
 
 export type AssistantState = {
   status: "idle" | "connecting" | "ready" | "running" | "offline"
@@ -37,142 +33,13 @@ function load(): Persisted | null {
     return null
   }
 }
+
 function save(p: Persisted | null) {
   try {
     if (p) localStorage.setItem(STORAGE, JSON.stringify(p))
     else localStorage.removeItem(STORAGE)
   } catch {
-    // storage unavailable
-  }
-}
-
-/** Folds turn events (live or replayed) into chat items and pending actions. */
-class Transcript {
-  items: ChatItem[] = []
-  events = new Map<string, TFEvent>()
-  approvals: PendingApproval[] = []
-  questions: PendingQuestion[] = []
-  auth: PendingAuth[] = []
-
-  private upsert(item: ChatItem) {
-    const i = this.items.findIndex((x) => x.id === item.id)
-    if (i === -1) this.items.push(item)
-    else this.items[i] = item
-  }
-
-  user(id: string, text: string) {
-    this.upsert({ kind: "user", id, text })
-  }
-
-  clearPending() {
-    this.approvals = []
-    this.questions = []
-    this.auth = []
-  }
-
-  private toolCallsOf(ev: TFEvent): ToolCall[] {
-    const calls = (ev.tool_calls as Array<Record<string, any>> | undefined) ?? []
-    return calls.map((tc) => ({
-      id: String(tc.id ?? ""),
-      name: String(tc.function?.name ?? tc.tool_info?.name ?? "tool"),
-      args: String(tc.function?.arguments ?? ""),
-    }))
-  }
-
-  apply(ev: TFEvent) {
-    const threadId = (ev.thread_id as string | null) ?? "main"
-    switch (ev.type) {
-      case "model.message": {
-        this.events.set(ev.id, ev)
-        this.upsert({ kind: "assistant", id: ev.id, threadId, text: String(ev.content ?? ""), toolCalls: this.toolCallsOf(ev) })
-        break
-      }
-      case "model.message.delta": {
-        const base = this.events.get(ev.id)
-        if (!base) {
-          this.events.set(ev.id, { ...ev, type: "model.message" })
-          this.upsert({ kind: "assistant", id: ev.id, threadId, text: String(ev.content ?? ""), toolCalls: [] })
-          return
-        }
-        if (typeof ev.content === "string") base.content = String(base.content ?? "") + ev.content
-        const deltas = (ev.tool_calls as Array<Record<string, any>> | undefined) ?? []
-        if (deltas.length) {
-          const calls = ((base.tool_calls as Array<Record<string, any>>) ??= [])
-          for (const d of deltas) {
-            const idx = typeof d.index === "number" ? d.index : calls.length
-            const target = (calls[idx] ??= { id: "", function: { name: "", arguments: "" } })
-            if (d.id) target.id = d.id
-            if (d.function?.name) target.function.name = (target.function.name ?? "") + d.function.name
-            if (d.function?.arguments) target.function.arguments = (target.function.arguments ?? "") + d.function.arguments
-            if (d.tool_info) target.tool_info = d.tool_info
-          }
-        }
-        this.upsert({ kind: "assistant", id: ev.id, threadId, text: String(base.content ?? ""), toolCalls: this.toolCallsOf(base) })
-        break
-      }
-      case "tool.response": {
-        const callId = String(ev.tool_call_id ?? "")
-        const name = this.findCall(callId)?.name ?? "tool"
-        this.upsert({ kind: "tool", id: ev.id, threadId, toolCallId: callId, name, content: String(ev.content ?? "") })
-        break
-      }
-      case "thread.created": {
-        this.upsert({ kind: "thread", id: `thread:${ev.thread_id}`, threadId, title: String(ev.title ?? "Sub-agent"), done: false })
-        break
-      }
-      case "thread.done": {
-        const existing = this.items.find((x) => x.kind === "thread" && x.threadId === threadId)
-        this.upsert({ kind: "thread", id: `thread:${ev.thread_id}`, threadId, title: existing?.kind === "thread" ? existing.title : "Sub-agent", done: true })
-        break
-      }
-      case "tool.approval_required": {
-        for (const ref of (ev.tool_calls as Array<{ id: string; source_event_id: string }>) ?? []) {
-          const call = this.findCall(ref.id, ref.source_event_id)
-          this.approvals.push({ threadId, toolCallId: ref.id, name: call?.name ?? "tool", args: call?.args ?? "" })
-        }
-        break
-      }
-      case "tool.response_required": {
-        for (const ref of (ev.tool_calls as Array<{ id: string; source_event_id: string }>) ?? []) {
-          const call = this.findCall(ref.id, ref.source_event_id)
-          let question = "The agent needs your input."
-          let options: string[] = []
-          try {
-            const parsed = JSON.parse(call?.args || "{}") as { question?: string; options?: string[] }
-            if (parsed.question) question = parsed.question
-            if (Array.isArray(parsed.options)) options = parsed.options.map(String)
-          } catch {
-            // free-form
-          }
-          this.questions.push({ threadId, toolCallId: ref.id, question, options })
-        }
-        break
-      }
-      case "mcp.auth_required": {
-        for (const s of (ev.mcp_servers as Array<{ name: string; auth_url: string }>) ?? []) {
-          this.auth.push({ name: s.name, authUrl: s.auth_url })
-        }
-        break
-      }
-      case "turn.done": {
-        const state = ev.state as { status: string; message?: string; reason?: string }
-        if (state.status === "error") this.upsert({ kind: "note", id: `${ev.id}:err`, text: `The agent stopped with an error: ${state.message ?? "unknown"}` })
-        if (state.status === "cancelled" && state.reason !== "cancelled-for-next-turn") this.upsert({ kind: "note", id: `${ev.id}:cancel`, text: "Turn cancelled." })
-        break
-      }
-      default:
-        break
-    }
-  }
-
-  private findCall(callId: string, sourceEventId?: string): ToolCall | undefined {
-    const from = sourceEventId ? this.events.get(sourceEventId) : undefined
-    const pools = from ? [from] : [...this.events.values()]
-    for (const ev of pools) {
-      const call = this.toolCallsOf(ev).find((c) => c.id === callId)
-      if (call) return call
-    }
-    return undefined
+    // storage unavailable (private mode); the session just will not resume
   }
 }
 
