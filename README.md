@@ -148,18 +148,23 @@ not estimate, and the media sandbox is for work that must reach the media files.
 
 ## Qodo Code Review Evidence
 
-Every pull request below was reviewed by Qodo before it merged:
+### Merging on the review
 
-| PR | What it added | Qodo reviews | Findings |
-| --- | --- | --- | --- |
-| [#2](https://github.com/deonmenezes/edit-ai/pull/2) | ffmpeg sandbox MCP server and video-editing skill | 1 | 2 real, both fixed |
-| [#3](https://github.com/deonmenezes/edit-ai/pull/3) | EditAI on the TrueForge agent harness | 2 | 6 total: 4 fixed, 1 retracted, 1 rejected with evidence |
-| [#9](https://github.com/deonmenezes/edit-ai/pull/9) | Sandbox documentation and verified-run evidence | 1 | 0 bugs, 0 rule violations, 0 requirement gaps |
+Qodo posts its verdict as an issue comment. It publishes no check run, no commit
+status and no approving review, so GitHub's own auto-merge has nothing to gate
+on. `.github/workflows/qodo-automerge.yml` is that missing gate.
 
-Reviews on #2 and #3 were run through Qodo Merge before the Qodo GitHub App was
-connected, so they appear under the repository owner's account. #9 was reviewed
-by the app itself and is posted by `qodo-code-review[bot]`, which is the form
-every later PR takes.
+It fails closed in every direction, because the first draft did not and Qodo
+said so. It reads only the structured counter chips, never the prose: Qodo
+quotes findings and diff hunks verbatim, so the words "no issues found" appear
+inside reviews that are *not* clean, and any substring test on the comment body
+is forgeable by the pull request's own content. It binds the verdict to the
+commit Qodo footers in the comment and refuses to merge when that is no longer
+the head, since a review applies to one revision and `issue_comment` runs give a
+job no link to the pull request head. It treats a failure to read check state as
+an error rather than as an absence of failures. And it merges with
+`--match-head-commit`, so a push racing the merge is rejected by GitHub instead
+of slipping in.
 
 ### PR #3, first review
 
