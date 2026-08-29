@@ -1,0 +1,15 @@
+{
+  "name": "editai",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:web": "turbo dev --filter=@editai/web",
+    "build": "turbo build",
+    "deploy": "turbo deploy"
+  },
+  "devDependencies": {
+    "turbo": "latest"
+  },
+  "packageManager": "bun@1.3.11"
+}

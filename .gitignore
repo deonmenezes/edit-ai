@@ -1,0 +1,8 @@
+node_modules/
+.turbo/
+.env
+.env.*
+!.env.example
+
+# Claude Code / OMC local state
+.omc/
