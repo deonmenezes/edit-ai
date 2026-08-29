@@ -41,3 +41,8 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      # The merge gate's parser decides whether unreviewed code can land, so it
+      # is tested here rather than only in the workflow that uses it.
+      - name: Test the Qodo verdict parser
+        run: python3 tests/test_qodo_verdict.py

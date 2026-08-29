@@ -1,0 +1,319 @@
+<h3>Code Review by Qodo</h3>
+
+<code>🐞 Bugs (4)</code>  <code>📘 Rule violations (0)</code>  <code>📜 Skill insights (0)</code>
+
+<img src="https://www.qodo.ai/wp-content/uploads/2025/11/light-grey-line.svg" height="10%" alt="Grey Divider">
+
+<br/>
+
+<img src="https://img.shields.io/badge/High-634FD1?style=flat-square" height="20px" alt="Action required">
+
+<details>
+<summary>  1.  Quoted text approves review <code>🐞 Bug</code> <code>⛨ Security</code></summary>
+
+<br/>
+
+> <details open>
+><summary>Description</summary>
+><br/>
+>
+><pre>
+>The verdict parser marks the entire Qodo comment clean when <b><i>no issues found</i></b> occurs anywhere,
+>including a finding or quoted diff snippet. A non-clean review that quotes PR-controlled text
+>containing this phrase therefore proceeds to the merge step.
+></pre>
+></details>
+
+> <details>
+><summary>Code</summary>
+><br/>
+>
+><code>[.github/workflows/qodo-automerge.yml[R36-37]](https://github.com/deonmenezes/edit-ai/pull/14/files#diff-08f97bc772f762f2b8b6047c4b37dc1f1c57672ffcb6333f0a077879ea3a9d32R36-R37)</code>
+>
+>```diff
+>+          if grep -qF 'no issues found' <<<"$BODY"; then
+>+            clean=true
+>```
+></details>
+
+> <details>
+><summary>Evidence</summary>
+><br/>
+>
+><pre>
+>The workflow&#x27;s unanchored grep directly sets <b><i>clean=true</i></b>, and that output alone enables the merge
+>step. A public Qodo review demonstrates that Qodo comments include findings and quoted source code,
+>so occurrence anywhere in the free-form body is not equivalent to the authoritative verdict.
+></pre>
+>
+> <code>[.github/workflows/qodo-automerge.yml[31-47]](https://github.com/deonmenezes/edit-ai/blob/eccd35235e14dd6dba1f11d89bb648be418efd0a/.github/workflows/qodo-automerge.yml/#L31-L47)</code>
+> <code>🌐 [The Qodo review shown on this PR contains issue prose and quoted source snippets in the same comment body, demonstrating that arbitrary review text is mixed with the verdict.](https://github.com/qodo-ai/pr-agent/pull/1859)</code>
+></details>
+
+> <details>
+><summary>Agent prompt</summary>
+><br/>
+>
+>```
+>The issue below was found during a code review. Follow the provided context and guidance below and implement a solution
+>
+>## Issue description
+>The workflow treats an arbitrary substring in Qodo's free-form comment as a clean verdict, so findings or quoted PR content can falsely authorize a merge.
+>
+>## Issue Context
+>Qodo review comments can contain explanatory findings and source snippets. Validate a uniquely identified summary section or structured verdict, and reject ambiguous bodies or bodies containing nonzero findings.
+>
+>## Fix Focus Areas
+>- .github/workflows/qodo-automerge.yml[31-42]
+>```
+> <code>ⓘ Copy this prompt and use it to remediate the issue with your preferred AI generation tools</code>
+></details>
+
+<hr/>
+</details>
+
+
+<details>
+<summary>  2.  Verdict ignores reviewed commit <code>🐞 Bug</code> <code>⛨ Security</code></summary>
+
+<br/>
+
+> <details open>
+><summary>Description</summary>
+><br/>
+>
+><pre>
+>The workflow parses a comment without identifying the commit Qodo reviewed, then queries checks and
+>merges whatever head currently belongs to the PR number. If a new commit reaches the branch after
+>the review comment is created but before this job reads the PR, the newer unreviewed head can be
+>merged.
+></pre>
+></details>
+
+> <details>
+><summary>Code</summary>
+><br/>
+>
+><code>[.github/workflows/qodo-automerge.yml[R55-56]](https://github.com/deonmenezes/edit-ai/pull/14/files#diff-08f97bc772f762f2b8b6047c4b37dc1f1c57672ffcb6333f0a077879ea3a9d32R55-R56)</code>
+>
+>```diff
+>+          state=$(gh pr view "$PR" --repo "$REPO" \
+>+            --json state,isDraft,mergeable --jq '[.state,.isDraft,.mergeable]|@tsv')
+>```
+></details>
+
+> <details>
+><summary>Evidence</summary>
+><br/>
+>
+><pre>
+>The event supplies only the comment body to the parser, while <b><i>gh pr view</i></b> omits <b><i>headRefOid</i></b> and
+>all later commands target the current PR by number. GitHub also documents that <b><i>issue_comment</i></b>
+>workflows run with the default branch&#x27;s commit/ref rather than the pull request head, so the event
+>itself does not bind this run to the reviewed PR revision.
+></pre>
+>
+> <code>[.github/workflows/qodo-automerge.yml[7-9]](https://github.com/deonmenezes/edit-ai/blob/eccd35235e14dd6dba1f11d89bb648be418efd0a/.github/workflows/qodo-automerge.yml/#L7-L9)</code>
+> <code>[.github/workflows/qodo-automerge.yml[27-43]](https://github.com/deonmenezes/edit-ai/blob/eccd35235e14dd6dba1f11d89bb648be418efd0a/.github/workflows/qodo-automerge.yml/#L27-L43)</code>
+> <code>[.github/workflows/qodo-automerge.yml[55-83]](https://github.com/deonmenezes/edit-ai/blob/eccd35235e14dd6dba1f11d89bb648be418efd0a/.github/workflows/qodo-automerge.yml/#L55-L83)</code>
+> <code>🌐 [For `issue_comment`, GitHub documents `GITHUB_SHA` as the last commit on the default branch and `GITHUB_REF` as the default branch, not the pull request head.](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)</code>
+></details>
+
+> <details>
+><summary>Agent prompt</summary>
+><br/>
+>
+>```
+>The issue below was found during a code review. Follow the provided context and guidance below and implement a solution
+>
+>## Issue description
+>A Qodo verdict is not tied to the PR head commit that the workflow ultimately checks and merges.
+>
+>## Issue Context
+>Obtain the reviewed commit SHA from authoritative Qodo metadata and compare it with the current `headRefOid` immediately before merging. If Qodo provides no verifiable revision identity, fail closed rather than treating the comment as authorization for the current tip.
+>
+>## Fix Focus Areas
+>- .github/workflows/qodo-automerge.yml[27-43]
+>- .github/workflows/qodo-automerge.yml[55-83]
+>```
+> <code>ⓘ Copy this prompt and use it to remediate the issue with your preferred AI generation tools</code>
+></details>
+
+<hr/>
+</details>
+
+
+<details>
+<summary>  3.  Check errors permit merging <code>🐞 Bug</code> <code>☼ Reliability</code></summary>
+
+<br/>
+
+> <details open>
+><summary>Description</summary>
+><br/>
+>
+><pre>
+>Both check queries convert every CLI/API failure into <b><i>0</i></b>, so an outage, authorization error,
+>malformed response, or absence of reported checks is interpreted as no failed and no pending checks.
+>The workflow then executes the direct merge without establishing that the Bun build passed.
+></pre>
+></details>
+
+> <details>
+><summary>Code</summary>
+><br/>
+>
+><code>[.github/workflows/qodo-automerge.yml[R68-71]](https://github.com/deonmenezes/edit-ai/pull/14/files#diff-08f97bc772f762f2b8b6047c4b37dc1f1c57672ffcb6333f0a077879ea3a9d32R68-R71)</code>
+>
+>```diff
+>+          failed=$(gh pr checks "$PR" --repo "$REPO" --json name,state \
+>+            --jq '[.[] | select(.state == "FAILURE" or .state == "ERROR" or .state == "CANCELLED")] | length' 2>/dev/null || echo 0)
+>+          pending=$(gh pr checks "$PR" --repo "$REPO" --json name,state \
+>+            --jq '[.[] | select(.state == "PENDING" or .state == "IN_PROGRESS" or .state == "QUEUED")] | length' 2>/dev/null || echo 0)
+>```
+></details>
+
+> <details>
+><summary>Evidence</summary>
+><br/>
+>
+><pre>
+>Each <b><i>gh pr checks</i></b> command has <b><i>|| echo 0</i></b>; the only subsequent blockers are nonzero string
+>comparisons, and zero/zero falls through to <b><i>gh pr merge</i></b>. The repository&#x27;s actual build and test
+>check is the <b><i>build</i></b> job in Bun CI, but this workflow never requires that result to be present.
+></pre>
+>
+> <code>[.github/workflows/qodo-automerge.yml[68-83]](https://github.com/deonmenezes/edit-ai/blob/eccd35235e14dd6dba1f11d89bb648be418efd0a/.github/workflows/qodo-automerge.yml/#L68-L83)</code>
+> <code>[.github/workflows/bun-ci.yml[17-43]](https://github.com/deonmenezes/edit-ai/blob/eccd35235e14dd6dba1f11d89bb648be418efd0a/.github/workflows/bun-ci.yml/#L17-L43)</code>
+></details>
+
+> <details>
+><summary>Agent prompt</summary>
+><br/>
+>
+>```
+>The issue below was found during a code review. Follow the provided context and guidance below and implement a solution
+>
+>## Issue description
+>Failures retrieving check status are converted to zero and allow an unchecked direct merge.
+>
+>## Issue Context
+>Separate command execution success from parsed check counts. Abort on retrieval/parsing errors and require the expected CI result, or enforce the build as a required branch check, before merging.
+>
+>## Fix Focus Areas
+>- .github/workflows/qodo-automerge.yml[68-83]
+>- .github/workflows/bun-ci.yml[17-43]
+>```
+> <code>ⓘ Copy this prompt and use it to remediate the issue with your preferred AI generation tools</code>
+></details>
+
+<hr/>
+</details>
+
+
+<details><summary><ins><strong>View high (1)</strong></ins></summary><br/>
+<details>
+<summary>  4.  Pending checks never hand off <code>🐞 Bug</code> <code>≡ Correctness</code></summary>
+
+<br/>
+
+> <details open>
+><summary>Description</summary>
+><br/>
+>
+><pre>
+><b><i>gh pr checks</i></b> exits with status 8 while checks are pending, so <b><i>|| echo 0</i></b> appends another <b><i>0</i></b> to
+>the first query&#x27;s output and makes <b><i>failed</i></b> a multiline value such as <b><i>0\n0</i></b>. The line 73 comparison
+>then treats that value as a failure and exits before the intended pending-check auto-merge branch.
+></pre>
+></details>
+
+> <details>
+><summary>Code</summary>
+><br/>
+>
+><code>[.github/workflows/qodo-automerge.yml[R68-69]](https://github.com/deonmenezes/edit-ai/pull/14/files#diff-08f97bc772f762f2b8b6047c4b37dc1f1c57672ffcb6333f0a077879ea3a9d32R68-R69)</code>
+>
+>```diff
+>+          failed=$(gh pr checks "$PR" --repo "$REPO" --json name,state \
+>+            --jq '[.[] | select(.state == "FAILURE" or .state == "ERROR" or .state == "CANCELLED")] | length' 2>/dev/null || echo 0)
+>```
+></details>
+
+> <details>
+><summary>Evidence</summary>
+><br/>
+>
+><pre>
+>The fallback is inside command substitution, and the first guard compares the entire captured string
+>to exactly <b><i>0</i></b>. The official GitHub CLI manual documents exit code 8 for pending checks, proving
+>that the fallback runs in precisely the case intended for lines 76-80.
+></pre>
+>
+> <code>[.github/workflows/qodo-automerge.yml[68-80]](https://github.com/deonmenezes/edit-ai/blob/eccd35235e14dd6dba1f11d89bb648be418efd0a/.github/workflows/qodo-automerge.yml/#L68-L80)</code>
+> <code>🌐 [The official `gh pr checks` manual documents additional exit code 8 meaning checks are pending.](https://cli.github.com/manual/gh_pr_checks)</code>
+></details>
+
+> <details>
+><summary>Agent prompt</summary>
+><br/>
+>
+>```
+>The issue below was found during a code review. Follow the provided context and guidance below and implement a solution
+>
+>## Issue description
+>The documented pending-check exit status contaminates the captured count, causing pending checks to be handled as failures before auto-merge can be enabled.
+>
+>## Issue Context
+>Do not append fallback output to successful JSON output. Explicitly distinguish exit status 8 from retrieval failures, or query check runs through an API whose transport status is independent from check conclusions.
+>
+>## Fix Focus Areas
+>- .github/workflows/qodo-automerge.yml[68-80]
+>```
+> <code>ⓘ Copy this prompt and use it to remediate the issue with your preferred AI generation tools</code>
+></details>
+
+<hr/>
+</details>
+
+
+</details>
+
+<img src="https://www.qodo.ai/wp-content/uploads/2025/11/light-grey-line.svg" height="10%" alt="Grey Divider">
+
+
+<!-- qodo-context:start -->
+<details><summary><strong>Context sources</strong></summary>
+
+<div>&#x2705; Compliance rules (platform): <a href="https://app.qodo.ai/rules?state=active&amp;scopes=/deonmenezes/edit-ai/"><code>30 rules</code></a></div>
+<div>&#x2705; Web pages:</div>
+<div>&nbsp;&nbsp;<a href="https://cli.github.com/manual/gh_pr_checks"><code>🌐 GitHub CLI | Take GitHub to the command line</code></a></div>
+<div>&nbsp;&nbsp;<a href="https://github.com/cli/cli/pull/9439"><code>🌐 cmd/pr/checks: Describe bucket and state JSON fields</code></a></div>
+<div>&nbsp;&nbsp;<a href="https://man.archlinux.org/man/gh-pr-checks.1.en"><code>🌐 gh-pr-checks(1) — Arch manual pages</code></a></div>
+<div>&nbsp;&nbsp;<code>+17 more</code></div>
+<div>Review mode: <code>⚖️ Balanced</code>: This changes CI merge automation with repository write permissions, bot-authentication checks, verdict parsing, and build-gating behavior; it is security- and release-sensitive but localized enough for one careful review.</div>
+<!-- qodo-context:end -->
+</details>
+
+<img src="https://www.qodo.ai/wp-content/uploads/2025/11/light-grey-line.svg" height="10%" alt="Grey Divider">
+
+
+
+<!-- qodo-daily-tip:start -->
+
+<details>
+<summary><strong>Tip of the day</strong></summary>
+
+<br/>
+
+<pre>💡 Did you know, you can group findings by type and pick your Finding display, from Minimal to Full</pre>
+
+<a href="https://docs.qodo.ai/tips-and-tricks">More tips ↗</a> | <a href="https://app.qodo.ai/configurations?tab=display-preferences">Customize Qodo ↗</a> | <a href="https://docs.qodo.ai">Qodo docs ↗</a>
+
+</details>
+
+<img src="https://www.qodo.ai/wp-content/uploads/2025/11/light-grey-line.svg" height="10%" alt="Grey Divider">
+<!-- qodo-daily-tip:end -->
+
+
+<!-- https://github.com/deonmenezes/edit-ai/commit/eccd35235e14dd6dba1f11d89bb648be418efd0a -->
