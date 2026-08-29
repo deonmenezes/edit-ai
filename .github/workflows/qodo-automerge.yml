@@ -8,7 +8,10 @@ name: Qodo auto-merge
 # no longer the head, or any error reading check state all end in "do not merge".
 on:
   issue_comment:
-    types: [created]
+    # Qodo posts a placeholder ("Qodo is busy working") and then edits the verdict
+    # into that same comment, so the verdict arrives as an edit and never as a
+    # creation. Listening only for created meant this never saw a real verdict.
+    types: [created, edited]
 
 permissions:
   contents: write
@@ -19,11 +22,15 @@ jobs:
   merge-on-clean-review:
     # issue_comment fires for issues too, so confirm this is a PR and that the
     # comment is Qodo's own. The bot type is checked as well as the login,
-    # because a login is display text an account could imitate.
+    # because a login is display text an account could imitate. The sender is
+    # checked too: comment.user stays the bot when a human edits the bot's
+    # comment, so on an edited event only the sender says who actually wrote the
+    # text being read.
     if: >
       github.event.issue.pull_request != null &&
       github.event.comment.user.login == 'qodo-code-review[bot]' &&
-      github.event.comment.user.type == 'Bot'
+      github.event.comment.user.type == 'Bot' &&
+      github.event.sender.login == 'qodo-code-review[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Read the verdict and the commit it applies to
