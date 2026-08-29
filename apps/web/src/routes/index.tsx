@@ -1,23 +1,30 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { CommandBar } from "#/components/editor/command-bar"
-import { PROJECT } from "#/components/editor/data"
 import { Preview } from "#/components/editor/preview"
-import { Properties } from "#/components/editor/properties"
+import { RightRail } from "#/components/editor/right-rail"
 import { SidePanel } from "#/components/editor/side-panel"
 import { Timeline } from "#/components/editor/timeline"
 import { TopBar } from "#/components/editor/top-bar"
+import { useAssistant } from "#/components/editor/use-assistant"
 import { usePlayback } from "#/components/editor/use-playback"
+import { useProject } from "#/components/editor/use-project"
 
 export const Route = createFileRoute("/")({ component: Editor })
 
 function Editor() {
-  const project = PROJECT
+  const { project, connected, lastChange } = useProject()
+  const assistant = useAssistant()
   const { time, playing, toggle, seek, nudge } = usePlayback(project.duration)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [prompt, setPrompt] = useState("")
 
   const selected = project.clips.find((c) => c.id === selectedId) ?? null
+
+  // A clip the agent deleted should not stay selected.
+  useEffect(() => {
+    if (selectedId && !project.clips.some((c) => c.id === selectedId)) setSelectedId(null)
+  }, [project, selectedId])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -44,16 +51,22 @@ function Editor() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      <TopBar projectName={project.name} time={time} fps={project.fps} />
+      <TopBar projectName={project.name} time={time} fps={project.fps} live={connected} lastChange={lastChange} />
 
       <div className="flex min-h-0 flex-1">
         <SidePanel clips={project.clips} onSuggest={setPrompt} />
         <Preview project={project} time={time} playing={playing} onToggle={toggle} onSeek={seek} className="flex-1" />
-        <Properties clip={selected} fps={project.fps} className="hidden lg:flex" />
+        <RightRail assistant={assistant} clip={selected} fps={project.fps} className="hidden lg:flex" />
       </div>
 
       <div className="flex h-[clamp(220px,42dvh,320px)] shrink-0 flex-col border-t">
-        <CommandBar value={prompt} onChange={setPrompt} />
+        <CommandBar
+          value={prompt}
+          onChange={setPrompt}
+          onSubmit={(text) => void assistant.send(text)}
+          busy={assistant.status === "running"}
+          disabled={assistant.status === "offline"}
+        />
         <Timeline
           project={project}
           time={time}

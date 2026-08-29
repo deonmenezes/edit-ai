@@ -4,32 +4,78 @@ AI-powered video editor for the web.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat)](LICENSE)
 
-## Status
+An editor where you describe the change and an agent makes it: "remove the silences", "caption
+every clip", "cut the intro to three seconds". The agent edits the real timeline through tools, and
+anything destructive stops for your approval first.
 
-Early development. The web app is a scaffold right now; the editor, timeline, and AI features are being built.
+## How it works
 
-## Stack
+EditAI is built on [TrueForge](https://trueforge.dev), an open-source agent harness. The harness
+runs the agent loop; EditAI supplies the domain.
 
-- [TanStack Start](https://tanstack.com/start) + React 19
-- Vite + Tailwind CSS v4 + shadcn/ui
-- Cloudflare Workers (via Wrangler)
-- Bun + Turborepo monorepo
+```
+  browser                    harness                     domain
+┌──────────────┐   HTTP    ┌──────────────┐   MCP    ┌──────────────────┐
+│  editor UI   │◄─────────►│  TrueForge   │◄────────►│  @editai/agent   │
+│  (apps/web)  │  + SSE    │  agent loop  │          │  16 timeline     │
+│              │           │  approvals   │          │  tools           │
+│  timeline ◄──┼───────────┼──────────────┼── SSE ───┤  project store   │
+└──────────────┘           └──────────────┘          └──────────────────┘
+```
+
+The editor never calls a model. It creates a session, streams turn events, renders tool calls and
+sub-agent threads, and answers the harness when it pauses. The timeline redraws from the agent
+server's event stream, so an edit the agent makes shows up in the UI as it happens.
+
+| Capability | Where it lives |
+| --- | --- |
+| MCP tools, including your own servers and OAuth ones | `apps/agent/src/tools.ts`, registered by `apps/agent/scripts/setup.ts` |
+| Human approvals before destructive edits | MCP `destructiveHint` annotations → `require_approval_for_tools` → the approval card in `apps/web/src/components/editor/assistant-panel.tsx` |
+| Sub-agents | Enabled on the agent; per-clip fan-out for captioning, rendered as threads in the UI |
+| Sessions that survive a reload | `apps/web/src/components/editor/use-assistant.ts` replays turns and re-attaches to a running one |
+| Any model provider | `apps/agent/scripts/setup.ts` registers whichever API keys are present, including any OpenAI-compatible endpoint |
+| Sandboxed execution | Configured automatically when `DAYTONA_API_KEY` is set |
 
 ## Getting started
 
+You need [Bun](https://bun.sh) and Node 22.14+ (for the harness).
+
 ```bash
 bun install
-bun run dev:web
+
+# 1. the harness
+npx @truefoundry/trueforge@latest        # http://localhost:8790
+
+# 2. the timeline tools
+cd apps/agent && bun run start           # http://localhost:8941
+
+# 3. wire them together (any one key is enough)
+ANTHROPIC_API_KEY=sk-... bun run setup
+
+# 4. the editor
+cd ../.. && bun run dev:web              # http://localhost:5173
 ```
 
-The web app runs at http://localhost:5173.
+Then ask for an edit: "Remove the silences", "Caption every video clip".
+
+Without the harness running, the editor still loads with a sample timeline; the assistant panel
+says it is offline.
+
+## Stack
+
+- [TanStack Start](https://tanstack.com/start) + React 19, Vite, Tailwind CSS v4, shadcn/ui
+- [TrueForge](https://trueforge.dev) agent harness, [MCP](https://modelcontextprotocol.io) tools
+- Cloudflare Workers (via Wrangler), Bun + Turborepo monorepo
 
 ## Layout
 
 ```
 apps/
-  web/   TanStack Start app (deploys to Cloudflare Workers)
+  web/     the editor: timeline, preview, assistant panel
+  agent/   MCP server exposing the timeline, plus the agent definition
 ```
+
+See [apps/agent/README.md](apps/agent/README.md) for the tool reference and timeline semantics.
 
 ## Scripts
 

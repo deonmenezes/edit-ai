@@ -9,6 +9,10 @@ export type Clip = {
   start: number
   /** seconds */
   duration: number
+  /** offset into the source media, seconds */
+  sourceOffset?: number
+  /** 0..100 */
+  volume?: number
 }
 
 export type Track = {
@@ -24,6 +28,7 @@ export type Project = {
   duration: number
   tracks: Track[]
   clips: Clip[]
+  exports?: { id: string; format: string; resolution: string; createdAt: string; file: string }[]
 }
 
 export const PROJECT: Project = {

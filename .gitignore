@@ -6,3 +6,6 @@ node_modules/
 
 # Claude Code / OMC local state
 .omc/
+
+# TrueForge local data (SQLite lives in the OS app data dir; this is just a run dir)
+.trueforge/
