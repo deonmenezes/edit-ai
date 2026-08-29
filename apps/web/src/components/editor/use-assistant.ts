@@ -126,6 +126,9 @@ export function useAssistant() {
     })()
     return () => {
       cancelled = true
+      // Without this the reattached stream keeps consuming events and calling setState after
+      // the component is gone, and the connection is never closed.
+      abort.current?.abort()
     }
   }, [consume, publish])
 

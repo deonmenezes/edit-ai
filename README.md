@@ -86,6 +86,25 @@ See [apps/agent/README.md](apps/agent/README.md) for the tool reference and time
 | `bun run build`     | Build every app                       |
 | `bun run deploy`    | Build and deploy to Cloudflare        |
 
+## Qodo code review evidence
+
+[PR #3](https://github.com/deonmenezes/edit-ai/pull/3) was reviewed with Qodo Merge, which raised
+three issues. All three were real and all three are fixed in the PR:
+
+1. **Duplicate clip ids after repeated ripple deletes** (`apps/agent/src/project.ts`). The
+   right-hand half of a split clip took the id `${c.id}r`, so a clip cut more than once produced
+   the same id twice. Reproduced on the sample project: `removeSilences` left three clips sharing
+   `c6r` and three sharing `c7r`, which breaks clip lookup, deletion and React keys. Ids are now
+   allocated from the set of ids in use. Covered by three regression tests.
+2. **Export announced before the file existed.** `exportProject` committed the record, which
+   notifies SSE subscribers synchronously, and only then wrote the file. The write now happens
+   first.
+3. **The session-restore effect leaked its stream on unmount**, calling `setState` on a gone
+   component and leaving the connection open. Its cleanup now aborts the controller.
+
+The first finding is the one that mattered: the test suite had missed it, because the existing
+ripple-delete test asserted the buggy `c1r` id as if it were correct.
+
 ## Contributing
 
 Issues and pull requests are welcome. See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for setup and guidelines, and open an issue first for anything larger than a bug fix.

@@ -56,6 +56,15 @@ export type Change = { id: number; at: string; op: string; summary: string }
 
 const round = (n: number) => Math.round(n * 1000) / 1000
 
+/** The next id not already in `used`. Adds it to the set so callers can allocate in a loop. */
+function allocateId(used: Set<string>, prefix = "c"): string {
+  let n = used.size + 1
+  while (used.has(`${prefix}${n}`)) n++
+  const id = `${prefix}${n}`
+  used.add(id)
+  return id
+}
+
 export function seedProject(): Project {
   return {
     name: "Untitled project",
@@ -146,10 +155,8 @@ export class ProjectStore {
     return t
   }
 
-  private newId(prefix: string) {
-    let n = this.project.clips.length + 1
-    while (this.project.clips.some((c) => c.id === `${prefix}${n}`)) n++
-    return `${prefix}${n}`
+  private newId(prefix = "c") {
+    return allocateId(new Set(this.project.clips.map((c) => c.id)), prefix)
   }
 
   private commit(op: string, summary: string, fn: (p: Project) => void) {
@@ -325,6 +332,9 @@ export class ProjectStore {
     const width = rangeEnd - rangeStart
     this.commit("ripple_delete", `Removed ${round(rangeStart)}s-${round(rangeEnd)}s from all tracks`, (p) => {
       const next: Clip[] = []
+      // Ids must stay unique across every split this pass makes: a clip that spans the range is
+      // cut in two, and removeSilences ripples repeatedly over the same long clips.
+      const used = new Set(p.clips.map((c) => c.id))
       for (const c of p.clips) {
         const cs = c.start
         const ce = c.start + c.duration
@@ -339,7 +349,7 @@ export class ProjectStore {
           next.push({ ...c, duration: leftDur })
           next.push({
             ...c,
-            id: `${c.id}r`,
+            id: allocateId(used),
             start: rangeStart,
             duration: ce - rangeEnd,
             sourceOffset: c.sourceOffset + leftDur + width,
@@ -403,11 +413,13 @@ export class ProjectStore {
       durationSeconds: this.project.duration,
       file: `${dir}/${this.project.name.replace(/\s+/g, "-").toLowerCase()}-${resolution}.${format}`,
     }
+    // Written before the commit: commit notifies subscribers synchronously, and a client that
+    // reacts to the new export record must not find the file missing.
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(rec.file, JSON.stringify({ export: rec, project: this.project }, null, 2))
     this.commit("export_project", `Exported ${resolution} ${format}`, (p) => {
       p.exports.push(rec)
     })
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(rec.file, JSON.stringify({ export: rec, project: this.project }, null, 2))
     return rec
   }
 }

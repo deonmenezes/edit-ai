@@ -26,16 +26,22 @@ describe("ProjectStore", () => {
 
   test("ripple delete closes the gap on every track", () => {
     const s = new ProjectStore()
+    const before = new Set(s.get().clips.map((c) => c.id))
     const p = s.rippleDelete(3, 4)
+
+    // intro.mp4 spans the removed range, so it is cut in two and the second half is a new clip.
     const intro = p.clips.find((c) => c.id === "c1")!
-    const introRight = p.clips.find((c) => c.id === "c1r")!
-    const broll = p.clips.find((c) => c.id === "c2")!
+    const introRight = p.clips.find((c) => c.name === "intro.mp4" && !before.has(c.id))!
     expect(intro.duration).toBe(3)
     expect(introRight.start).toBe(3)
     expect(introRight.duration).toBe(1)
     expect(introRight.sourceOffset).toBe(4)
-    expect(broll.start).toBe(4)
+
+    // everything that started after the range shifts left by its width
+    expect(p.clips.find((c) => c.id === "c2")!.start).toBe(4)
     expect(p.duration).toBe(23)
+
+    // a clip that only overlaps the start of the range is just shortened
     const hook = p.clips.find((c) => c.id === "c4")!
     expect(hook.start).toBe(0.5)
     expect(hook.duration).toBe(2.5)
@@ -110,5 +116,33 @@ describe("caption merging", () => {
     const s = new ProjectStore()
     const { clips } = s.addCaptions([{ start: 1, end: 2, text: "Keep" }, { start: 3, end: 4 } as never])
     expect(clips.length).toBe(1)
+  })
+})
+
+describe("clip ids stay unique", () => {
+  test("repeated ripple deletes over one clip never reuse an id", () => {
+    const s = new ProjectStore()
+    // The voiceover spans the whole timeline, so all three silences cut the same clip.
+    s.removeSilences(0.5)
+    const ids = s.get().clips.map((c) => c.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  test("every clip a range splits gets its own fresh id", () => {
+    const s = new ProjectStore()
+    const before = new Set(s.get().clips.map((c) => c.id))
+    // 2s-3s falls inside intro.mp4, the hook title, the voiceover and the music.
+    const p = s.rippleDelete(2, 3)
+    const added = p.clips.filter((c) => !before.has(c.id))
+    expect(added).toHaveLength(4)
+    expect(new Set(p.clips.map((c) => c.id)).size).toBe(p.clips.length)
+  })
+
+  test("a clip deleted after a ripple resolves to one clip", () => {
+    const s = new ProjectStore()
+    s.removeSilences(0.5)
+    const target = s.get().clips.filter((c) => c.trackId === "a1")[1]!
+    s.deleteClip(target.id)
+    expect(s.get().clips.some((c) => c.id === target.id)).toBe(false)
   })
 })
