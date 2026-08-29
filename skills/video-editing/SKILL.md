@@ -6,13 +6,13 @@ description: Recipes and rules for cutting, cropping, captioning, and normalizin
 # Video editing with ffmpeg
 
 All work happens through the `ffmpeg-sandbox` connector. Never use bash, `ls`, or any
-built-in sandbox tools for media files — they cannot see the media workspace.
+built-in sandbox tools for media files; they cannot see the media workspace.
 
 Tools available:
-- `list_media` — what is in the workspace
-- `probe_media` — duration, resolution, codecs, fps
-- `run_ffmpeg` — run ffmpeg with an argument array
-- `run_python` — glue work, parsing, arithmetic
+- `list_media`: what is in the workspace
+- `probe_media`: duration, resolution, codecs, fps
+- `run_ffmpeg`: run ffmpeg with an argument array
+- `run_python`: glue work, parsing, arithmetic
 
 ## Rules
 
@@ -24,7 +24,8 @@ The sandbox has no network access.
 
 **Dimensions must be even.** H.264 rejects odd width or height. When a computed crop
 lands on an odd number, round down. `crop=ih*9/16:ih` on a 1920x1080 source gives
-607.5, so ffmpeg's own rounding produces 608 — always verify with a probe afterwards.
+607.5, so ffmpeg's own rounding produces 608, and you should always verify with a probe
+afterwards.
 
 **Verify every render.** After any command that produces a file, probe the output and
 confirm duration and resolution match the intent. A command that exits 0 can still
@@ -100,7 +101,7 @@ then build a trim list from what you find.
 ```
 ["-i","clip.mp4","-vf","fade=t=in:st=0:d=0.5,fade=t=out:st=14.5:d=0.5","-c:a","copy","faded.mp4"]
 ```
-The fade-out `st` must be the clip duration minus the fade length — probe first.
+The fade-out `st` must be the clip duration minus the fade length, so probe first.
 
 ### Concatenate clips
 Write a list file with `run_python`:
