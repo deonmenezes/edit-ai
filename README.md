@@ -153,6 +153,12 @@ Two pull requests were reviewed with Qodo Merge before merge:
 | --- | --- | --- | --- |
 | [#2](https://github.com/deonmenezes/edit-ai/pull/2) | ffmpeg sandbox MCP server and video-editing skill | 1 | 2 real, both fixed |
 | [#3](https://github.com/deonmenezes/edit-ai/pull/3) | EditAI on the TrueForge agent harness | 2 | 6 total: 4 fixed, 1 retracted, 1 rejected with evidence |
+| [#9](https://github.com/deonmenezes/edit-ai/pull/9) | Sandbox documentation and verified-run evidence | 1 | 0 bugs, 0 rule violations, 0 requirement gaps |
+
+Reviews on #2 and #3 were run through Qodo Merge before the Qodo GitHub App was
+connected, so they appear under the repository owner's account. #9 was reviewed
+by the app itself and is posted by `qodo-code-review[bot]`, which is the form
+every later PR takes.
 
 ### PR #3, first review
 
