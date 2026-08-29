@@ -6,6 +6,7 @@
     "dev": "turbo dev",
     "dev:web": "turbo dev --filter=@editai/web",
     "build": "turbo build",
+    "test": "turbo test",
     "deploy": "turbo deploy"
   },
   "devDependencies": {
