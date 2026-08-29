@@ -39,10 +39,5 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Test (agent)
-        working-directory: apps/agent
-        run: bun test
-
-      - name: Test (web)
-        working-directory: apps/web
+      - name: Test
         run: bun run test
