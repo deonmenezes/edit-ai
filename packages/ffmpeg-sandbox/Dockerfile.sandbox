@@ -1,0 +1,14 @@
+# Sandbox image for agent-written media commands.
+# Small, no network tooling, ffmpeg + ffprobe + python for glue work.
+#
+#   docker build -f Dockerfile.sandbox -t editai-sandbox .
+
+FROM alpine:3.20
+
+RUN apk add --no-cache \
+      ffmpeg \
+      python3 \
+    && adduser -D -u 1000 sandbox
+
+WORKDIR /work
+USER sandbox
