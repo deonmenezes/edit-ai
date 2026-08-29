@@ -146,3 +146,23 @@ describe("clip ids stay unique", () => {
     expect(s.get().clips.some((c) => c.id === target.id)).toBe(false)
   })
 })
+
+describe("trim respects the source media after a split", () => {
+  // A review flagged `end - (c.start - c.sourceOffset)` as the wrong bound. It is not: the
+  // expression expands to `c.sourceOffset + (end - c.start)`, the source time at `end`. These
+  // tests pin the boundary so the correct form is not "fixed" into a broken one later.
+  test("a trimmed clip may extend to exactly the end of its media", () => {
+    const s = new ProjectStore()
+    s.splitClip("c3", 16) // talking-head.mp4: 13s of media, right half starts at 16 with offset 5
+    const right = s.get().clips.find((c) => c.start === 16 && c.name === "talking-head.mp4")!
+    expect(right.sourceOffset).toBe(5)
+    expect(s.trimClip(right.id, { end: 24 }).duration).toBe(8)
+  })
+
+  test("but not one frame past it", () => {
+    const s = new ProjectStore()
+    s.splitClip("c3", 16)
+    const right = s.get().clips.find((c) => c.start === 16 && c.name === "talking-head.mp4")!
+    expect(() => s.trimClip(right.id, { end: 24.5 })).toThrow(/source media/)
+  })
+})

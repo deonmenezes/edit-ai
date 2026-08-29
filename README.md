@@ -105,6 +105,19 @@ three issues. All three were real and all three are fixed in the PR:
 The first finding is the one that mattered: the test suite had missed it, because the existing
 ripple-delete test asserted the buggy `c1r` id as if it were correct.
 
+A second review of the updated PR raised three more. Two were real and fixed; one was checked and
+rejected:
+
+- **Real:** a header-auth connector whose env var had no `: value` registered an empty header and
+  failed silently. It now reports the expected format instead.
+- **Real:** `setup.ts` POSTs API keys to the harness, so it now refuses to do that over plaintext
+  HTTP to anything but localhost.
+- **False positive:** the reviewer called the source-media bound in `trimClip`
+  (`end - (c.start - c.sourceOffset)`) wrong and predicted a clip could be extended to 28s instead
+  of 18s. The expression expands to `c.sourceOffset + (end - c.start)`, which is the correct source
+  time, and the code accepts exactly up to the limit and rejects one frame past it. Two tests now
+  pin that boundary so the correct form is not "fixed" into a broken one later.
+
 ## Contributing
 
 Issues and pull requests are welcome. See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for setup and guidelines, and open an issue first for anything larger than a bug fix.

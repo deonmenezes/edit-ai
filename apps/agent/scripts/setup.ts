@@ -130,14 +130,20 @@ async function configureConnectors(): Promise<{ name: string; auth: string }[]> 
         console.warn(`  skip connector "${name}": needs ${name.toUpperCase().replace(/-/g, "_")}_MCP_HEADER (e.g. "Authorization: Bearer ...")`)
         continue
       }
-      const [header, ...rest] = key.split(":")
+      const sep = key.indexOf(":")
+      if (sep === -1 || !key.slice(sep + 1).trim()) {
+        console.warn(`  skip connector "${name}": its header env var must be "Header-Name: value"`)
+        continue
+      }
+      const header = key.slice(0, sep).trim()
+      const value = key.slice(sep + 1).trim()
       await api("PUT", "/settings/mcp-servers", {
         manifest: {
           type: "remote",
           name,
           url: entry.url,
           description: entry.description ?? name,
-          auth: { type: "header", headers: { [header!.trim()]: rest.join(":").trim() } },
+          auth: { type: "header", headers: { [header]: value } },
         },
       })
     } else {
@@ -217,6 +223,16 @@ async function upsertAgent(model: string, sandbox: boolean, connectors: { name: 
   }
   const { data } = await api<{ data: { id: string } }>("POST", "/agents", { name: AGENT_NAME, manifest })
   return { id: data.data.id, updated: false }
+}
+
+// API keys are POSTed to the harness. Over plaintext HTTP that is only acceptable on this machine.
+const tfUrl = new URL(TF)
+const isLocal = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(tfUrl.hostname)
+if (tfUrl.protocol !== "https:" && !isLocal) {
+  throw new Error(
+    `Refusing to send API keys to ${TF} over plaintext HTTP. Use https:// for a remote TrueForge, ` +
+      `or set TRUEFORGE_BASE_URL to a localhost address.`,
+  )
 }
 
 console.log(`TrueForge: ${TF}`)
