@@ -6,14 +6,14 @@
 
 [**Live site**](https://editai-agent.vercel.app) &middot;
 [Quick start](#getting-started) &middot;
-[The 16 tools](#the-16-timeline-tools) &middot;
+[The 19 tools](#the-19-timeline-tools) &middot;
 [Add your own MCP](#reaching-past-the-timeline) &middot;
 [Review evidence](#code-review-evidence-qodo)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat)](LICENSE)
 [![Built on TrueForge](https://img.shields.io/badge/harness-TrueForge-7c5cff?style=flat)](https://trueforge.dev)
 [![MCP](https://img.shields.io/badge/protocol-MCP-7c5cff?style=flat)](https://modelcontextprotocol.io)
-[![Tests](https://img.shields.io/badge/tests-31%20passing-3aa39b?style=flat)](#tests)
+[![Tests](https://img.shields.io/badge/tests-58%20passing-3aa39b?style=flat)](#tests)
 [![Reviewed by Qodo](https://img.shields.io/badge/reviewed%20by-Qodo-e0a63b?style=flat)](#code-review-evidence-qodo)
 
 </div>
@@ -86,11 +86,16 @@ harness runs the agent loop; EditAI supplies the domain.
   browser                    harness                     domain
 ┌──────────────┐   HTTP    ┌──────────────┐   MCP    ┌──────────────────┐
 │  editor UI   │◄─────────►│  TrueForge   │◄────────►│  @editai/agent   │
-│  (apps/web)  │  + SSE    │  agent loop  │          │  16 timeline     │
-│              │           │  approvals   │          │  tools           │
-│  timeline ◄──┼───────────┼──────────────┼── SSE ───┤  project store   │
-└──────────────┘           └──────┬───────┘          └──────────────────┘
-                                  │ MCP
+│  (apps/web)  │  + SSE    │  agent loop  │          │  19 timeline     │
+│  decode      │           │  approvals   │          │  tools           │
+│  composite   │           │              │          │  project store   │
+│  encode      │           │              │          │  media on disk   │
+│  timeline ◄──┼───────────┼──────────────┼── SSE ───┤  render queue    │
+└──────┬───────┘           └──────┬───────┘          └────────┬─────────┘
+       │                          │ MCP                       │
+       │  media bytes + rendered mp4 (HTTP)                    │
+       └───────────────────────────────────────────────────────┘
+                                  │
                     ┌─────────────┼──────────────┐
                     ▼             ▼              ▼
             ┌──────────────┐ ┌─────────┐ ┌──────────────┐
@@ -99,6 +104,19 @@ harness runs the agent loop; EditAI supplies the domain.
             │ (container)  │ │ (web)   │ │ speaks MCP   │
             └──────────────┘ └─────────┘ └──────────────┘
 ```
+
+**The editor is the renderer.** Decoding and encoding happen in the browser through
+[WebCodecs](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API), wrapped by
+[mediabunny](https://mediabunny.dev): the agent queues a render, the editor claims it, composites
+every frame onto a canvas, muxes it, and posts the file back. The agent then sees a real path and a
+real byte count, which is what lets it check its own work.
+
+The engine follows [OpenCut](https://github.com/opencut-app/opencut-classic), whose renderer this is
+ported from: the same frame cache (a forward iterator with a prefetched next frame, falling back to a
+real seek only when the target is behind the decoder or too far ahead of it) and the same
+`Output`/`CanvasSource`/`AudioBufferSource` muxing. The one deliberate departure is compositing in
+Canvas2D rather than OpenCut's wgpu compositor: EditAI stacks video, text and audio with no effects
+or masks, which 2D covers exactly, and it drops a wasm dependency. Effects would need the real thing.
 
 The editor never calls a model. It creates a session, streams turn events, renders tool calls and
 sub-agent threads, and answers the harness when it pauses. The timeline redraws from the agent
@@ -115,29 +133,32 @@ server's event stream, so an edit the agent makes shows up in the UI as it happe
 | Sandboxed execution | Two layers: the harness sandbox (Daytona) for general code, and `packages/ffmpeg-sandbox` for media work |
 | Domain know-how | `skills/video-editing/SKILL.md`, loaded by the agent whenever a task touches ffmpeg |
 
-## The 16 timeline tools
+## The 19 timeline tools
 
-The timeline is exposed to the agent as **16 [MCP](https://modelcontextprotocol.io) tools**, not as
+The timeline is exposed to the agent as **19 [MCP](https://modelcontextprotocol.io) tools**, not as
 a prompt describing a timeline. The agent calls real functions against real state.
 
 | Tool | Kind | Arguments | What it does |
 | --- | --- | --- | --- |
 | `get_project` | read | | Tracks, clips, media metadata, exports. Call it first; ids change after edits. |
+| `list_media` | read | | Imported files with their measured duration, resolution and frame rate, and whether the bytes are on disk. |
 | `list_changes` | read | `limit` | Recent edits, oldest first. |
 | `transcribe_clip` | read | `clip_id` | Speech inside one clip, as timed segments in timeline seconds. |
-| `find_silences` | read | `min_duration`, `track_id` | Silent ranges on a track. Preview only. |
-| `detect_beats` | read | `track_id` | Beat timestamps derived from the track's tempo. |
+| `find_silences` | read | `min_duration`, `track_id` | Silent ranges measured from the decoded audio. Preview only. |
+| `detect_beats` | read | `track_id` | Beat timestamps from the tempo estimated off the track's onsets. |
 | `split_clip` | write | `clip_id`, `at` | Cuts a clip in two. Returns both halves. |
 | `trim_clip` | write | `clip_id`, `start?`, `end?` | New in/out points, keeping media in sync via `sourceOffset`. |
 | `move_clip` | write | `clip_id`, `start?`, `track_id?` | New start time, or another track of the same kind. |
 | `set_volume` | write | `clip_id`, `volume` | Clip volume, 0 to 100. |
+| `add_clip` | write | `name`, `track_id`, `start`, `duration?`, `source_offset?` | Places imported media on a video or audio track. |
 | `add_text` | write | `text`, `start`, `duration`, `track_id` | A title or caption on a text track. |
 | `add_captions` | write | `segments[]`, `track_label` | Timed captions on the captions track, creating it if needed. |
 | `undo` | write | | Reverts the most recent change. |
 | `delete_clip` | **destructive** | `clip_id` | Removes a clip, leaving a gap. |
 | `ripple_delete` | **destructive** | `start`, `end` | Removes a range from every track and closes the gap. |
 | `remove_silences` | **destructive** | `min_duration`, `track_id` | Ripple-deletes every silence over the threshold. |
-| `export_project` | **approval** | `format`, `resolution` | Renders the timeline to a file. |
+| `export_project` | **approval** | `format`, `resolution` | Queues a real render. Refuses if any clip's media is missing. |
+| `get_export` | read | `export_id` | Render status: pending, rendering with progress, done with the file and its byte size, or failed with the error. |
 
 Every tool validates its input with zod and returns errors to the model **as data**, so a stale clip
 id becomes a correction the agent recovers from rather than a failed turn.
@@ -247,10 +268,21 @@ ANTHROPIC_API_KEY=sk-... bun run setup
 cd ../.. && bun run dev:web              # http://localhost:5173
 ```
 
-Then ask for an edit: "Remove the silences", "Caption every video clip".
+Then bring in footage. Drop any video or audio file onto the editor, or use **Import** in the Media
+panel: the browser measures it with WebCodecs, uploads the bytes to the agent, and analyzes the audio
+so silences, the waveform and tempo come from your file. No footage handy?
+
+```bash
+cd apps/agent && bun scripts/make-samples.ts   # writes data/samples with ffmpeg
+```
+
+Then ask for an edit: "Remove the silences", "Caption every video clip", "Export it at 1080p". The
+export lands in `apps/agent/data/exports` as a real mp4, and the Export button turns into a download
+link once it does.
 
 Without the harness running, the editor still loads with a sample timeline; the assistant panel
-says it is offline. `setup` is idempotent, so rerun it after changing `agent.json` or adding a key.
+says it is offline. That sample timeline names media it has no bytes for, so the preview says so
+and export refuses until real files are imported. `setup` is idempotent, so rerun it after changing `agent.json` or adding a key.
 
 ### Environment
 
@@ -277,10 +309,18 @@ documented set.
 ```
 apps/
   web/                  the editor: timeline, preview, assistant panel
+    src/engine/         decode, composite, encode: the renderer, ported from OpenCut
+      media.ts          probing and upload over range-requested HTTP
+      video-cache.ts    the frame cache: forward iterator, prefetch, seek fallback
+      audio.ts          decode, timeline mixdown, silence/peak/tempo analysis
+      compositor.ts     one frame of the timeline, drawn in Canvas2D
+      exporter.ts       mediabunny mux: CanvasSource + AudioBufferSource
   agent/                MCP server exposing the timeline, plus the agent definition
-    src/tools.ts        the 16 tools
-    src/project.ts      the timeline model: split, trim, ripple delete, captions
+    src/tools.ts        the 19 tools
+    src/project.ts      the timeline model: split, trim, ripple delete, captions, renders
+    src/media.ts        media names, mime types, streamed uploads
     scripts/setup.ts    registers models, connectors, sandbox and the agent
+    scripts/make-samples.ts  generates real sample footage with ffmpeg
 packages/
   ffmpeg-sandbox/       containerised ffmpeg/ffprobe/python MCP server
 skills/
@@ -304,11 +344,13 @@ tests/                  the Qodo verdict parser's fixtures and tests
 
 ## Tests
 
-**31 tests**, all passing.
+**58 tests**, all passing.
 
 | Suite | Count | Covers |
 | --- | --- | --- |
-| `apps/agent/test/project.test.ts` | 17 | Split and trim invariants, ripple-delete arithmetic across tracks, silence removal, transcript windowing, caption merging, undo, and the clip-id and trim-bound regressions Qodo surfaced. |
+| `apps/agent/test/project.test.ts` | 30 | Split and trim invariants, ripple-delete arithmetic across tracks, silence removal, transcript windowing, caption merging, undo, media registration and clip placement bounds, and the render lifecycle: one claim per job, and a finished render that a late progress or failure report cannot reopen. |
+| `apps/web/src/engine/audio.test.ts` | 10 | Silence detection against injected gaps and sub-threshold room tone, the peak envelope, and tempo recovered from a synthetic click track. |
+| `apps/web/src/engine/compositor.test.ts` | 8 | Which clips are live at a time, source-time mapping through `sourceOffset`, and which clips reach the audio mix. |
 | `apps/web/.../transcript.test.ts` | 6 | Transcript windowing and caption rendering in the editor. |
 | `tests/test_qodo_verdict.py` | 8 | The merge gate's verdict parser, against the real Qodo comment bodies that broke it. |
 
@@ -397,6 +439,8 @@ rejected:
 
 - [TanStack Start](https://tanstack.com/start) + React 19, Vite, Tailwind CSS v4, shadcn/ui
 - [TrueForge](https://trueforge.dev) agent harness, [MCP](https://modelcontextprotocol.io) tools
+- [mediabunny](https://mediabunny.dev) over WebCodecs for decode, mux and encode, with the frame
+  cache and export pipeline ported from [OpenCut](https://github.com/opencut-app/opencut-classic)
 - Cloudflare Workers (via Wrangler), Bun + Turborepo monorepo
 - Landing page: hand-written static HTML in `site/`, deployed to Vercel
 
@@ -404,10 +448,16 @@ rejected:
 
 Worth stating plainly, because the demo does not make them obvious:
 
-- `export_project` writes a JSON description of the render rather than encoding video. Wiring it to
-  ffmpeg is the obvious next step and does not change the agent-facing contract.
-- Transcripts, silences and tempo come from media metadata in the sample project rather than from
-  running ASR and onset detection over real files.
+- **Transcripts are still fixtures.** Silences, the waveform and tempo are now measured from the
+  decoded audio, but `transcribe_clip` reads transcript segments stored on the media rather than
+  running ASR. Wiring a real recognizer in is the next gap to close.
+- **Rendering needs the editor open.** The agent queues a render and the browser performs it, so
+  `export_project` from a headless session waits for a page to claim the job. A server-side ffmpeg
+  worker consuming the same queue would fix it without changing any tool signature.
+- **Compositing is Canvas2D.** Video, text and audio composite correctly; effects, transitions,
+  masks and blend modes have nowhere to live. Those need OpenCut's wgpu compositor, not this one.
+- **Codecs are the browser's.** Import refuses anything Chrome cannot decode, and mp4 audio falls
+  back to Opus where AAC encoding is unavailable.
 - Motion graphics have no dedicated timeline tool yet. Today they go through the ffmpeg sandbox or
   an attached MCP server.
 

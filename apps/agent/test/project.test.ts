@@ -1,5 +1,19 @@
 import { describe, expect, test } from "bun:test"
 import { ProjectStore } from "../src/project.ts"
+import { randomUUID } from "node:crypto"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+const EXPORT_DIR = join(tmpdir(), "editai-test-exports")
+
+/** Stand in for a render the editor has already streamed to disk. */
+function uploaded(bytes: Uint8Array): string {
+  mkdirSync(EXPORT_DIR, { recursive: true })
+  const path = join(EXPORT_DIR, `upload-${randomUUID()}`)
+  writeFileSync(path, bytes)
+  return path
+}
 
 describe("ProjectStore", () => {
   test("split keeps media in sync", () => {
@@ -164,5 +178,115 @@ describe("trim respects the source media after a split", () => {
     s.splitClip("c3", 16)
     const right = s.get().clips.find((c) => c.start === 16 && c.name === "talking-head.mp4")!
     expect(() => s.trimClip(right.id, { end: 24.5 })).toThrow(/source media/)
+  })
+})
+
+describe("real media", () => {
+  /** No media dir given, so registered media counts as present: file-system checks are covered separately. */
+  const withMedia = () => {
+    const s = new ProjectStore()
+    s.reset({ empty: true })
+    s.registerMedia("clip.mp4", { duration: 12, file: "clip.mp4", width: 1920, height: 1080, fps: 30, hasAudio: true })
+    return s
+  }
+
+  test("an empty project starts with tracks but nothing on them", () => {
+    const s = new ProjectStore()
+    s.reset({ empty: true })
+    expect(s.get().clips).toEqual([])
+    expect(s.get().media).toEqual({})
+    expect(s.get().duration).toBe(0)
+  })
+
+  test("registering media records what was measured", () => {
+    const s = withMedia()
+    expect(s.get().media["clip.mp4"]).toMatchObject({ duration: 12, width: 1920, hasAudio: true })
+    expect(s.hasBytes("clip.mp4")).toBe(true)
+  })
+
+  test("a clip defaults to the rest of the file", () => {
+    const s = withMedia()
+    const clip = s.addClip({ name: "clip.mp4", trackId: "v1", start: 2, sourceOffset: 4 })
+    expect(clip.duration).toBe(8)
+    expect(clip.start).toBe(2)
+    expect(s.get().duration).toBe(10)
+  })
+
+  test("a clip cannot run past the end of its source", () => {
+    const s = withMedia()
+    expect(() => s.addClip({ name: "clip.mp4", trackId: "v1", start: 0, sourceOffset: 8, duration: 6 })).toThrow(/only has 4s/)
+  })
+
+  test("media that was never imported cannot be placed", () => {
+    const s = withMedia()
+    expect(() => s.addClip({ name: "ghost.mp4", trackId: "v1", start: 0 })).toThrow(/No media named/)
+  })
+
+  test("audio cannot be placed on a text track", () => {
+    const s = withMedia()
+    expect(() => s.addClip({ name: "clip.mp4", trackId: "t1", start: 0 })).toThrow(/text track/)
+  })
+
+  test("analysis attaches measurements to the media", () => {
+    const s = withMedia()
+    s.setMediaAnalysis("clip.mp4", { silences: [{ start: 1, end: 2 }], peaks: [0.1, 0.9], bpm: 120 })
+    const media = s.get().media["clip.mp4"]!
+    expect(media.silences).toEqual([{ start: 1, end: 2 }])
+    expect(media.bpm).toBe(120)
+    expect(media.analyzedAt).toBeTruthy()
+  })
+})
+
+describe("export lifecycle", () => {
+  const ready = () => {
+    const s = new ProjectStore()
+    s.reset({ empty: true })
+    s.registerMedia("clip.mp4", { duration: 10, file: "clip.mp4", width: 1920, height: 1080 })
+    s.addClip({ name: "clip.mp4", trackId: "v1", start: 0 })
+    return s
+  }
+
+  test("a render is queued, not written", () => {
+    const rec = ready().requestExport("mp4", "1080p", EXPORT_DIR)
+    expect(rec.status).toBe("pending")
+    expect(rec.width).toBe(1920)
+    expect(rec.sizeBytes).toBeUndefined()
+  })
+
+  test("resolution decides the frame size", () => {
+    const s = ready()
+    expect(s.requestExport("mp4", "720p", EXPORT_DIR)).toMatchObject({ width: 1280, height: 720 })
+    expect(s.requestExport("mp4", "4k", EXPORT_DIR)).toMatchObject({ width: 3840, height: 2160 })
+  })
+
+  test("the sample timeline cannot be rendered until real media is imported", () => {
+    const s = new ProjectStore()
+    expect(s.missingMedia().sort()).toEqual(["b-roll.mp4", "intro.mp4", "music.mp3", "talking-head.mp4", "voiceover.wav"])
+    expect(() => s.requestExport("mp4", "1080p", EXPORT_DIR)).toThrow(/no media on disk/)
+  })
+
+  test("only one worker can claim a render", () => {
+    const s = ready()
+    const rec = s.requestExport("mp4", "1080p", EXPORT_DIR)
+    expect(s.claimExport(rec.id)?.status).toBe("rendering")
+    expect(s.claimExport(rec.id)).toBeNull()
+  })
+
+  test("a finished render is not reopened by a late progress or failure report", () => {
+    const s = ready()
+    const rec = s.requestExport("mp4", "1080p", EXPORT_DIR)
+    s.claimExport(rec.id)
+    s.completeExport(rec.id, uploaded(new Uint8Array([1, 2, 3, 4])))
+    expect(s.getExport(rec.id)).toMatchObject({ status: "done", sizeBytes: 4 })
+    s.setExportProgress(rec.id, 0.5)
+    s.failExport(rec.id, "too late")
+    expect(s.getExport(rec.id)).toMatchObject({ status: "done", sizeBytes: 4 })
+  })
+
+  test("a failed render keeps its error", () => {
+    const s = ready()
+    const rec = s.requestExport("mp4", "1080p", EXPORT_DIR)
+    s.claimExport(rec.id)
+    expect(s.failExport(rec.id, "codec unsupported")).toMatchObject({ status: "failed", error: "codec unsupported" })
   })
 })

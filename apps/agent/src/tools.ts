@@ -68,6 +68,27 @@ export function buildServer(store: ProjectStore, exportsDir: string) {
   )
 
   server.registerTool(
+    "list_media",
+    {
+      title: "List imported media",
+      description:
+        "Every media file the user has imported, with its real duration, resolution, frame rate and whether its bytes are on disk. Only media listed here can be placed on the timeline or rendered.",
+      inputSchema: {},
+      annotations: READ,
+    },
+    handler(() =>
+      run(() => {
+        const project = store.get()
+        return Object.entries(project.media).map(([name, info]) => ({
+          name,
+          ...info,
+          onDisk: store.hasBytes(name),
+        }))
+      }),
+    ),
+  )
+
+  server.registerTool(
     "list_changes",
     {
       title: "List recent changes",
@@ -174,6 +195,38 @@ export function buildServer(store: ProjectStore, exportsDir: string) {
   )
 
   server.registerTool(
+    "add_clip",
+    {
+      title: "Add a media clip",
+      description:
+        "Place imported media on a video or audio track. Defaults to the whole file. Use list_media first: only media with bytes on disk can be placed.",
+      inputSchema: {
+        name: z.string().describe("Media file name from list_media, e.g. interview.mp4"),
+        track_id: z.string().describe("Video or audio track id, e.g. v1 or a1"),
+        start: z.number().min(0).describe("Timeline seconds"),
+        duration: z.number().min(0.1).optional().describe("Defaults to the rest of the file"),
+        source_offset: z.number().min(0).optional().describe("Seconds into the source to start from"),
+      },
+      annotations: WRITE,
+    },
+    handler(
+      ({
+        name,
+        track_id,
+        start,
+        duration,
+        source_offset,
+      }: {
+        name: string
+        track_id: string
+        start: number
+        duration?: number
+        source_offset?: number
+      }) => run(() => store.addClip({ name, trackId: track_id, start, duration, sourceOffset: source_offset })),
+    ),
+  )
+
+  server.registerTool(
     "add_text",
     {
       title: "Add a text clip",
@@ -262,16 +315,32 @@ export function buildServer(store: ProjectStore, exportsDir: string) {
     "export_project",
     {
       title: "Export the project",
-      description: "Render the timeline to a file. Always asks the user to approve first.",
+      description:
+        "Queue a real render of the timeline. The editor encodes it with WebCodecs and writes the file, so this returns immediately with a pending export; poll get_export until it is done, then report the real file and size. Fails if any clip's media is missing. Always asks the user to approve first.",
       inputSchema: {
-        format: z.enum(["mp4", "mov", "webm"]).default("mp4"),
+        format: z.enum(["mp4", "webm"]).default("mp4"),
         resolution: z.enum(["720p", "1080p", "4k"]).default("1080p"),
       },
       annotations: WRITE,
     },
     handler(({ format, resolution }: { format: string; resolution: string }) =>
-      run(() => store.exportProject(format, resolution, exportsDir)),
+      run(() => ({
+        ...store.requestExport(format, resolution, exportsDir),
+        note: "Rendering happens in the editor. Poll get_export with this id until status is done or failed.",
+      })),
     ),
+  )
+
+  server.registerTool(
+    "get_export",
+    {
+      title: "Check a render",
+      description:
+        "The status of a queued render: pending, rendering (with progress), done (with the file path and real byte size) or failed (with the error).",
+      inputSchema: { export_id: z.string().describe("Export id from export_project, e.g. exp1") },
+      annotations: READ,
+    },
+    handler(({ export_id }: { export_id: string }) => run(() => store.getExport(export_id))),
   )
 
   return mcp

@@ -2,7 +2,7 @@ import { Magnet, Scissors, ZoomIn, ZoomOut } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { Button } from "#/components/ui/button"
 import { cn } from "#/lib/utils"
-import { CLIP_TONE, clamp, formatShort, type Project } from "./data"
+import { CLIP_TONE, clamp, formatShort, type Clip, type MediaInfo, type Project } from "./data"
 
 type Props = {
   project: Project
@@ -171,7 +171,7 @@ export function Timeline({ project, time, playing, selectedId, onSelect, onSeek,
                           }}
                         >
                           <span className="block truncate px-2 leading-[calc(theme(spacing.11)-12px)]">{c.name}</span>
-                          {c.kind === "audio" && <Waveform seed={c.id} />}
+                          {c.kind === "audio" && <Waveform clip={c} media={project.media?.[c.name]} />}
                         </button>
                       )
                     })}
@@ -195,18 +195,38 @@ export function Timeline({ project, time, playing, selectedId, onSelect, onSeek,
   )
 }
 
-function Waveform({ seed }: { seed: string }) {
+function Waveform({ clip, media }: { clip: Clip; media?: MediaInfo }) {
   const bars = 120
-  let x = seed.charCodeAt(seed.length - 1) * 9301 + 49297
-  const heights = Array.from({ length: bars }, () => {
-    x = (x * 9301 + 49297) % 233280
-    return 0.2 + (x / 233280) * 0.8
-  })
+  const heights = media?.peaks?.length ? clipPeaks(media.peaks, clip, media.duration, bars) : placeholderPeaks(clip.id, bars)
   return (
     <span aria-hidden className="absolute inset-x-1 bottom-1 flex h-3 items-end gap-px opacity-50">
       {heights.map((h, i) => (
-        <span key={i} className="w-px flex-none bg-current" style={{ height: `${h * 100}%`, color: "var(--clip-audio)" }} />
+        <span key={i} className="w-px flex-none bg-current" style={{ height: `${Math.max(2, h * 100)}%`, color: "var(--clip-audio)" }} />
       ))}
     </span>
   )
+}
+
+/** The measured envelope, windowed to the part of the source this clip actually uses. */
+function clipPeaks(peaks: number[], clip: Clip, mediaDuration: number, bars: number): number[] {
+  if (mediaDuration <= 0) return placeholderPeaks(clip.id, bars)
+  const from = ((clip.sourceOffset ?? 0) / mediaDuration) * peaks.length
+  const to = (((clip.sourceOffset ?? 0) + clip.duration) / mediaDuration) * peaks.length
+  const span = Math.max(1, to - from)
+  return Array.from({ length: bars }, (_, i) => {
+    const start = Math.floor(from + (i / bars) * span)
+    const end = Math.max(start + 1, Math.floor(from + ((i + 1) / bars) * span))
+    let peak = 0
+    for (let j = start; j < end && j < peaks.length; j++) peak = Math.max(peak, peaks[j] ?? 0)
+    return peak
+  })
+}
+
+/** Stable stand-in for media that has not been analyzed, so clips still read as audio. */
+function placeholderPeaks(seed: string, bars: number): number[] {
+  let x = seed.charCodeAt(seed.length - 1) * 9301 + 49297
+  return Array.from({ length: bars }, () => {
+    x = (x * 9301 + 49297) % 233280
+    return 0.2 + (x / 233280) * 0.8
+  })
 }

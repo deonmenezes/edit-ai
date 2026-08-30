@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { CommandBar } from "#/components/editor/command-bar"
 import { Preview } from "#/components/editor/preview"
 import { RightRail } from "#/components/editor/right-rail"
@@ -7,8 +7,11 @@ import { SidePanel } from "#/components/editor/side-panel"
 import { Timeline } from "#/components/editor/timeline"
 import { TopBar } from "#/components/editor/top-bar"
 import { useAssistant } from "#/components/editor/use-assistant"
+import { useMediaImport } from "#/components/editor/use-media-import"
 import { usePlayback } from "#/components/editor/use-playback"
 import { useProject } from "#/components/editor/use-project"
+import { useRenderWorker } from "#/components/editor/use-render-worker"
+import { agentJson } from "#/lib/agent"
 
 export const Route = createFileRoute("/")({ component: Editor })
 
@@ -18,8 +21,27 @@ function Editor() {
   const { time, playing, toggle, seek, nudge } = usePlayback(project.duration)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [prompt, setPrompt] = useState("")
+  const { imports, importFiles } = useMediaImport()
+  const { state: render, error: renderError } = useRenderWorker(project)
+  const [dragging, setDragging] = useState(false)
 
   const selected = project.clips.find((c) => c.id === selectedId) ?? null
+  const media = project.media ?? {}
+  const exports = project.exports ?? []
+  const lastExport = [...exports].reverse().find((e) => e.status === "done")
+  // Nothing renders without media on disk, so the button says so rather than failing later.
+  const canExport =
+    connected &&
+    project.clips.length > 0 &&
+    project.clips.every((c) => c.kind === "text" || Boolean(media[c.name]?.file))
+
+  const queueExport = useCallback(() => {
+    void agentJson("/exports", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ format: "mp4", resolution: "1080p" }),
+    }).catch(() => undefined)
+  }, [])
 
   // A clip the agent deleted should not stay selected.
   useEffect(() => {
@@ -50,11 +72,38 @@ function Editor() {
   }, [toggle, seek, nudge, project.duration, project.fps])
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      <TopBar projectName={project.name} time={time} fps={project.fps} live={connected} lastChange={lastChange} />
+    <div
+      className="relative flex h-dvh flex-col overflow-hidden bg-background text-foreground"
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return
+        e.preventDefault()
+        setDragging(true)
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+        setDragging(false)
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return
+        e.preventDefault()
+        setDragging(false)
+        void importFiles(Array.from(e.dataTransfer.files))
+      }}
+    >
+      <TopBar
+        projectName={project.name}
+        time={time}
+        fps={project.fps}
+        live={connected}
+        lastChange={renderError ?? lastChange}
+        render={render}
+        lastExport={lastExport}
+        onExport={queueExport}
+        canExport={canExport}
+      />
 
       <div className="flex min-h-0 flex-1">
-        <SidePanel clips={project.clips} onSuggest={setPrompt} />
+        <SidePanel clips={project.clips} media={media} imports={imports} onImport={(files) => void importFiles(files)} onSuggest={setPrompt} />
         <Preview project={project} time={time} playing={playing} onToggle={toggle} onSeek={seek} className="flex-1" />
         <RightRail assistant={assistant} clip={selected} fps={project.fps} className="hidden lg:flex" />
       </div>
@@ -76,6 +125,12 @@ function Editor() {
           onSeek={seek}
         />
       </div>
+
+      {dragging && (
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-background/80">
+          <p className="rounded-md border border-dashed px-6 py-4 text-sm">Drop video or audio to import</p>
+        </div>
+      )}
     </div>
   )
 }
