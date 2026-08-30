@@ -12,6 +12,7 @@ import { usePlayback } from "#/components/editor/use-playback"
 import { useProject } from "#/components/editor/use-project"
 import { useRenderWorker } from "#/components/editor/use-render-worker"
 import { agentJson } from "#/lib/agent"
+import { fireAndForget } from "#/lib/async"
 
 export const Route = createFileRoute("/")({ component: Editor })
 
@@ -36,11 +37,13 @@ function Editor() {
     project.clips.every((c) => c.kind === "text" || Boolean(media[c.name]?.file))
 
   const queueExport = useCallback(() => {
-    void agentJson("/exports", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ format: "mp4", resolution: "1080p" }),
-    }).catch(() => undefined)
+    fireAndForget(
+      agentJson("/exports", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ format: "mp4", resolution: "1080p" }),
+      }),
+    )
   }, [])
 
   // A clip the agent deleted should not stay selected.
@@ -87,7 +90,7 @@ function Editor() {
         if (!e.dataTransfer.types.includes("Files")) return
         e.preventDefault()
         setDragging(false)
-        void importFiles(Array.from(e.dataTransfer.files))
+        fireAndForget(importFiles(Array.from(e.dataTransfer.files)))
       }}
     >
       <TopBar
@@ -103,7 +106,7 @@ function Editor() {
       />
 
       <div className="flex min-h-0 flex-1">
-        <SidePanel clips={project.clips} media={media} imports={imports} onImport={(files) => void importFiles(files)} onSuggest={setPrompt} />
+        <SidePanel clips={project.clips} media={media} imports={imports} onImport={(files) => fireAndForget(importFiles(files))} onSuggest={setPrompt} />
         <Preview project={project} time={time} playing={playing} onToggle={toggle} onSeek={seek} className="flex-1" />
         <RightRail assistant={assistant} clip={selected} fps={project.fps} className="hidden lg:flex" />
       </div>

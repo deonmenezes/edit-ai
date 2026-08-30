@@ -107,6 +107,7 @@ function MediaPanel({
         type="file"
         accept="video/*,audio/*"
         multiple
+        aria-label="Import video or audio files"
         className="sr-only"
         onChange={(e) => {
           onImport(Array.from(e.target.files ?? []))

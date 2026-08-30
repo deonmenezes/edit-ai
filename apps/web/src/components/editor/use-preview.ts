@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { audioContext, mixTimeline } from "#/engine/audio"
 import { clipsAtTime, drawTimelineFrame, sourceTimeFor, type FrameSources } from "#/engine/compositor"
 import { videoCache } from "#/engine/video-cache"
+import { fireAndForget } from "#/lib/async"
 import type { Project } from "./data"
 
 /** Preview resolution. Lower than the export on purpose: scrubbing should stay responsive. */
@@ -61,7 +62,7 @@ export function usePreview({ project, time, playing }: { project: Project; time:
         for (const clip of videoClips) {
           try {
             const frame = await videoCache.getFrameAt(clip.name, sourceTimeFor(clip, at))
-            if (frame) frames.set(clip.name, frame.canvas)
+            if (frame) frames.set(clip.id, frame.canvas)
           } catch (err) {
             setError(err instanceof Error ? err.message : String(err))
           }
@@ -72,14 +73,14 @@ export function usePreview({ project, time, playing }: { project: Project; time:
         setDecoding(false)
         const next = queued.current
         queued.current = null
-        if (next !== null && next !== at) void draw(next)
+        if (next !== null && next !== at) fireAndForget(draw(next))
       }
     },
     [project],
   )
 
   useEffect(() => {
-    void draw(time)
+    fireAndForget(draw(time))
   }, [draw, time])
 
   // ---- audio ---------------------------------------------------------------
@@ -91,7 +92,21 @@ export function usePreview({ project, time, playing }: { project: Project; time:
   const [muted, setMuted] = useState(false)
   const signature = audioSignature(project)
 
+  /**
+   * The live project, read inside startAudio without being a dependency of it.
+   *
+   * Every agent edit and every render progress report broadcasts a new project object. If the
+   * callback depended on that object, playback would stop and restart a few times a second
+   * during a render, which is audible.
+   */
+  const projectRef = useRef(project)
+  projectRef.current = project
+
+  /** Bumped whenever playback should stop; a slow mixdown checks it before it starts a node. */
+  const generation = useRef(0)
+
   const stopAudio = useCallback(() => {
+    generation.current += 1
     if (node.current) {
       try {
         node.current.stop()
@@ -107,14 +122,18 @@ export function usePreview({ project, time, playing }: { project: Project; time:
   const startAudio = useCallback(
     async (from: number) => {
       stopAudio()
-      if (muted || project.duration <= 0) return
+      const mine = generation.current
+      if (muted || projectRef.current.duration <= 0) return
       const ctx = audioContext()
       if (mix.current?.signature !== signature) {
-        mix.current = { signature, buffer: await mixTimeline(project).catch(() => null) }
+        mix.current = { signature, buffer: await mixTimeline(projectRef.current).catch(() => null) }
       }
       const buffer = mix.current?.buffer
       if (!buffer || from >= buffer.duration) return
       if (ctx.state === "suspended") await ctx.resume()
+      // Mixing and resuming are both awaits, and the user may have paused across either of
+      // them. Without this the preview sits paused while audio plays on.
+      if (generation.current !== mine) return
       const source = ctx.createBufferSource()
       source.buffer = buffer
       source.connect(ctx.destination)
@@ -122,14 +141,14 @@ export function usePreview({ project, time, playing }: { project: Project; time:
       node.current = source
       anchor.current = { contextTime: ctx.currentTime, timelineTime: from }
     },
-    [muted, project, signature, stopAudio],
+    [muted, signature, stopAudio],
   )
 
   const timeRef = useRef(time)
   timeRef.current = time
 
   useEffect(() => {
-    if (playing) void startAudio(timeRef.current)
+    if (playing) fireAndForget(startAudio(timeRef.current))
     else stopAudio()
     return stopAudio
   }, [playing, startAudio, stopAudio])
@@ -139,7 +158,7 @@ export function usePreview({ project, time, playing }: { project: Project; time:
     if (!playing || !anchor.current) return
     const ctx = audioContext()
     const expected = anchor.current.timelineTime + (ctx.currentTime - anchor.current.contextTime)
-    if (Math.abs(expected - time) > RESYNC_SECONDS) void startAudio(time)
+    if (Math.abs(expected - time) > RESYNC_SECONDS) fireAndForget(startAudio(time))
   }, [playing, time, startAudio])
 
   const toggleMuted = useCallback(() => {
@@ -150,7 +169,7 @@ export function usePreview({ project, time, playing }: { project: Project; time:
   }, [stopAudio])
 
   useEffect(() => {
-    if (playing && !muted && !node.current) void startAudio(timeRef.current)
+    if (playing && !muted && !node.current) fireAndForget(startAudio(timeRef.current))
   }, [muted, playing, startAudio])
 
   return { canvasRef, error, decoding, muted, toggleMuted, missing: missingMedia(project) }

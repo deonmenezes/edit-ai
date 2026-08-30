@@ -1,10 +1,10 @@
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import cors from "cors"
 import express from "express"
-import { createReadStream, existsSync, statSync } from "node:fs"
+import { createReadStream, existsSync, statSync, unlinkSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { mimeFor, safeMediaName, saveUpload } from "./media.ts"
+import { mimeFor, parseRange, readBody, safeMediaName, saveUpload, writeChunkAt } from "./media.ts"
 import { ProjectStore } from "./project.ts"
 import { buildServer } from "./tools.ts"
 
@@ -14,12 +14,15 @@ const MEDIA_DIR = join(DATA_DIR, "media")
 const EXPORTS_DIR = join(DATA_DIR, "exports")
 const PORT = Number(process.env.EDITAI_AGENT_PORT ?? 8941)
 
+/** Where an in-flight encode accumulates before it is moved to its final name. */
+const renderPath = (id: string) => join(EXPORTS_DIR, `${id}.render`)
+
 const store = new ProjectStore(join(DATA_DIR, "project.json"), MEDIA_DIR)
 const app = express()
 app.use(cors({ origin: true }))
 
 /** Uploads stream straight to disk, so they must not be buffered by the JSON parser first. */
-const isUpload = (url: string) => /^\/(media\/[^/]+|exports\/[^/]+\/file)$/.test(url.split("?")[0]!)
+const isUpload = (url: string) => /^\/(media\/[^/]+|exports\/[^/]+\/chunk)$/.test(url.split("?")[0]!)
 app.use((req, res, next) => (req.method === "POST" && isUpload(req.url) ? next() : express.json({ limit: "8mb" })(req, res, next)))
 
 const fail = (res: express.Response, status: number, err: unknown) =>
@@ -87,19 +90,17 @@ app.get("/media/:name", (req, res) => {
     const { size } = statSync(file)
     res.setHeader("Content-Type", mimeFor(name))
     res.setHeader("Accept-Ranges", "bytes")
-    // Range support keeps a <video> element and a partial re-fetch from pulling the whole file.
-    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "")
+    // Range support keeps a decoder from pulling the whole file to read one atom.
+    const range = parseRange(req.headers.range, size)
+    if (range === "unsatisfiable") {
+      res.setHeader("Content-Range", `bytes */${size}`)
+      return res.status(416).end()
+    }
     if (range) {
-      const start = range[1] ? Number(range[1]) : 0
-      const end = range[2] ? Math.min(Number(range[2]), size - 1) : size - 1
-      if (start >= size || end < start) {
-        res.setHeader("Content-Range", `bytes */${size}`)
-        return res.status(416).end()
-      }
       res.status(206)
-      res.setHeader("Content-Range", `bytes ${start}-${end}/${size}`)
-      res.setHeader("Content-Length", String(end - start + 1))
-      return createReadStream(file, { start, end }).pipe(res)
+      res.setHeader("Content-Range", `bytes ${range.start}-${range.end}/${size}`)
+      res.setHeader("Content-Length", String(range.end - range.start + 1))
+      return createReadStream(file, { start: range.start, end: range.end }).pipe(res)
     }
     res.setHeader("Content-Length", String(size))
     createReadStream(file).pipe(res)
@@ -128,7 +129,11 @@ app.get("/exports/pending", (_req, res) => res.json({ export: store.pendingExpor
 app.post("/exports/:id/claim", (req, res) => {
   try {
     const claimed = store.claimExport(req.params.id)
-    if (!claimed) return res.status(409).json({ error: `Export ${req.params.id} is not pending.`, export: store.getExport(req.params.id) })
+    if (!claimed) return res.status(409).json({ error: `Export ${req.params.id} is not claimable.`, export: store.getExport(req.params.id) })
+    // A reclaim starts from nothing. Writing a fresh encode over an abandoned one leaves any
+    // trailing bytes of the longer attempt behind, which is a corrupt file rather than a retry.
+    const partial = renderPath(claimed.id)
+    if (existsSync(partial)) unlinkSync(partial)
     res.json({ export: claimed })
   } catch (err) {
     fail(res, 404, err)
@@ -145,19 +150,52 @@ app.post("/exports/:id/progress", (req, res) => {
 
 app.post("/exports/:id/failed", (req, res) => {
   try {
+    // A half-written render is not worth keeping; the retry starts from an empty file.
+    const partial = renderPath(req.params.id)
+    if (existsSync(partial)) unlinkSync(partial)
     res.json({ export: store.failExport(req.params.id, String(req.body?.error ?? "Unknown render error")) })
   } catch (err) {
     fail(res, 400, err)
   }
 })
 
-/** The finished encode, streamed to disk and then moved into place. */
-app.post("/exports/:id/file", async (req, res) => {
+/** The timeline as it was when the render was queued. Workers render this, not the live project. */
+app.get("/exports/:id/project", (req, res) => {
+  try {
+    res.json({ project: store.exportSnapshot(req.params.id) })
+  } catch (err) {
+    fail(res, 404, err)
+  }
+})
+
+/**
+ * One slice of the encode, written at its byte offset.
+ *
+ * The muxer emits chunks as it goes and revisits earlier offsets to finish the index, so this
+ * takes a position rather than appending. Uploading as it encodes is what keeps a long render
+ * off the browser's heap.
+ */
+const CHUNK_LIMIT = 32 * 1024 * 1024
+
+app.post("/exports/:id/chunk", async (req, res) => {
   try {
     const rec = store.getExport(req.params.id)
-    const uploaded = join(EXPORTS_DIR, `${rec.id}.upload`)
-    const bytes = await saveUpload(req, EXPORTS_DIR, `${rec.id}.upload`)
-    res.json({ export: store.completeExport(rec.id, uploaded), bytes })
+    const position = Number((req.query as Record<string, string | undefined>).position)
+    if (!Number.isInteger(position) || position < 0) throw new Error("A non-negative integer ?position= is required.")
+    const data = await readBody(req, CHUNK_LIMIT)
+    if (data.length === 0) throw new Error("Chunk was empty.")
+    writeChunkAt(renderPath(rec.id), position, data)
+    res.json({ ok: true, position, bytes: data.length })
+  } catch (err) {
+    fail(res, 400, err)
+  }
+})
+
+/** The encode is complete: move what the chunks built into place. */
+app.post("/exports/:id/finish", (req, res) => {
+  try {
+    const rec = store.getExport(req.params.id)
+    res.json({ export: store.completeExport(rec.id, renderPath(rec.id)) })
   } catch (err) {
     fail(res, 400, err)
   }

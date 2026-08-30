@@ -1,5 +1,6 @@
 import type { Clip, Project } from "#/components/editor/data"
 
+/** Decoded frames for one instant, keyed by **clip id**: two clips can share one media file. */
 export type FrameSources = Map<string, CanvasImageSource>
 
 export type Surface = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
@@ -35,7 +36,7 @@ export function drawTimelineFrame(
 
   for (const clip of active) {
     if (clip.kind !== "video") continue
-    const frame = frames.get(clip.name)
+    const frame = frames.get(clip.id)
     if (frame) drawCover(ctx, frame, width, height)
   }
 
@@ -55,10 +56,20 @@ function drawCover(ctx: Surface, source: CanvasImageSource, width: number, heigh
   ctx.drawImage(source, (width - w) / 2, (height - h) / 2, w, h)
 }
 
-const sourceWidth = (s: CanvasImageSource) =>
-  "videoWidth" in s ? s.videoWidth : "naturalWidth" in s ? s.naturalWidth : "width" in s ? Number(s.width) : 0
-const sourceHeight = (s: CanvasImageSource) =>
-  "videoHeight" in s ? s.videoHeight : "naturalHeight" in s ? s.naturalHeight : "height" in s ? Number(s.height) : 0
+/** Each kind of image source reports its intrinsic size under a different name. */
+function sourceWidth(source: CanvasImageSource): number {
+  if ("videoWidth" in source) return source.videoWidth
+  if ("naturalWidth" in source) return source.naturalWidth
+  if ("width" in source) return Number(source.width)
+  return 0
+}
+
+function sourceHeight(source: CanvasImageSource): number {
+  if ("videoHeight" in source) return source.videoHeight
+  if ("naturalHeight" in source) return source.naturalHeight
+  if ("height" in source) return Number(source.height)
+  return 0
+}
 
 function drawCaption(ctx: Surface, text: string, width: number, height: number) {
   const fontSize = Math.round(height * 0.055)
@@ -75,7 +86,7 @@ function drawCaption(ctx: Surface, text: string, width: number, height: number) 
   ctx.shadowBlur = fontSize * 0.35
   ctx.shadowOffsetY = fontSize * 0.05
   ctx.fillStyle = "#ffffff"
-  lines.forEach((line, i) => ctx.fillText(line, width / 2, baseline + i * lineHeight))
+  for (const [i, line] of lines.entries()) ctx.fillText(line, width / 2, baseline + i * lineHeight)
   ctx.restore()
 }
 

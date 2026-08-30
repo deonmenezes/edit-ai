@@ -1,6 +1,6 @@
-import { createWriteStream, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs"
+import { closeSync, createWriteStream, existsSync, mkdirSync, openSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs"
 import { randomUUID } from "node:crypto"
-import { basename, extname, join } from "node:path"
+import { basename, dirname, extname, join } from "node:path"
 import type { IncomingMessage } from "node:http"
 import { pipeline } from "node:stream/promises"
 
@@ -37,6 +37,33 @@ export function safeMediaName(raw: string): string {
   return name
 }
 
+export type ByteRange = { start: number; end: number }
+
+/**
+ * Parse one HTTP byte range against a known size.
+ *
+ * The suffix form matters: `bytes=-500` means the *last* 500 bytes, not the first 500. Reading
+ * it as a start offset hands a decoder the head of the file when it asked for the tail, which
+ * is exactly where an mp4 keeps the index in a non-faststart file.
+ */
+export function parseRange(header: string | undefined, size: number): ByteRange | "unsatisfiable" | null {
+  const match = /^bytes=(\d*)-(\d*)$/.exec((header ?? "").trim())
+  if (!match) return null
+  const [, rawStart, rawEnd] = match
+  if (!rawStart && !rawEnd) return "unsatisfiable"
+
+  if (!rawStart) {
+    const suffix = Number(rawEnd)
+    if (suffix === 0) return "unsatisfiable"
+    return { start: Math.max(0, size - suffix), end: size - 1 }
+  }
+
+  const start = Number(rawStart)
+  const end = rawEnd ? Math.min(Number(rawEnd), size - 1) : size - 1
+  if (start >= size || end < start) return "unsatisfiable"
+  return { start, end }
+}
+
 /** Stream a request body to disk, refusing anything over the cap. */
 export async function saveUpload(req: IncomingMessage, dir: string, name: string): Promise<number> {
   mkdirSync(dir, { recursive: true })
@@ -65,4 +92,34 @@ export async function saveUpload(req: IncomingMessage, dir: string, name: string
   // Rename last so a reader never sees a half-written file under the real name.
   renameSync(tmp, target)
   return statSync(target).size
+}
+
+/** Collect a bounded request body. Used for render chunks, which are capped by the writer. */
+export function readBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const parts: Buffer[] = []
+    let size = 0
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length
+      if (size > maxBytes) {
+        req.destroy()
+        reject(new Error(`Chunk exceeds ${maxBytes} bytes.`))
+        return
+      }
+      parts.push(chunk)
+    })
+    req.on("end", () => resolve(Buffer.concat(parts)))
+    req.on("error", reject)
+  })
+}
+
+/** Write a chunk at its byte offset, creating the file if this is the first one. */
+export function writeChunkAt(path: string, position: number, data: Buffer): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const fd = openSync(path, existsSync(path) ? "r+" : "w+")
+  try {
+    writeSync(fd, data, 0, data.length, position)
+  } finally {
+    closeSync(fd)
+  }
 }

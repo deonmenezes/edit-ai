@@ -13,7 +13,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat)](LICENSE)
 [![Built on TrueForge](https://img.shields.io/badge/harness-TrueForge-7c5cff?style=flat)](https://trueforge.dev)
 [![MCP](https://img.shields.io/badge/protocol-MCP-7c5cff?style=flat)](https://modelcontextprotocol.io)
-[![Tests](https://img.shields.io/badge/tests-58%20passing-3aa39b?style=flat)](#tests)
+[![Tests](https://img.shields.io/badge/tests-71%20passing-3aa39b?style=flat)](#tests)
 [![Reviewed by Qodo](https://img.shields.io/badge/reviewed%20by-Qodo-e0a63b?style=flat)](#code-review-evidence-qodo)
 
 </div>
@@ -207,10 +207,35 @@ Extra connectors attach **read-only and deferred**, so a connector you rarely us
 context until the agent actually reaches for it. The tools go live on the agent's next turn, in the
 same conversation.
 
+### Bright Data
+
 **Bright Data** is the one wired up and verified: `search_engine`, `search_engine_batch`,
-`scrape_as_markdown`, `scrape_batch` and `ask_brightdata_assistant`. It is what lets you say "put
-their logo in the corner" and get the current logo rather than a model's memory of one.
-Setup details and the auth gotcha are in [docs/brightdata.md](docs/brightdata.md).
+`scrape_as_markdown`, `scrape_batch` and `ask_brightdata_assistant`, reported by the harness as
+`auth_status: authenticated`.
+
+It attaches by name like any catalog connector, `EDITAI_CONNECTORS=exa,bright-data`, with its token
+in `BRIGHT_DATA_MCP_HEADER`. With that variable unset, setup **skips** the connector rather than
+registering it with an empty header, because a registered connector whose every call fails at run
+time is worse than an absent one.
+
+What it is actually for is research that changes an edit, not decoration beside it:
+
+- **Naming and ordering clips.** Before titling, the agent researches how comparable short-form
+  videos are titled and applies the structures it finds. On Startup Boston Week footage it scraped
+  conference short-form titles, extracted four recurring shapes (number + highlight promise,
+  compressed recap, access/FOMO, question hook), and titled the clips to match.
+- **Fetching real assets.** "Put their logo in the corner" gets the current logo rather than a
+  model's memory of one.
+
+Two properties worth stating, because they are what make live web data safe to act on:
+
+- **Scraped text is evidence, never instruction.** The harness wraps each payload in a notice
+  marking it untrusted external data, so a page cannot talk the agent into a tool call.
+- **A layout change costs quality, not correctness.** `scrape_as_markdown` returns rendered text
+  rather than a selector path, and the agent treats an empty or truncated scrape as a failed
+  research step it reports, rather than titling clips from half a page.
+
+Setup details, the auth gotcha and a verified run are in [docs/brightdata.md](docs/brightdata.md).
 
 ## Where the code runs
 
@@ -344,11 +369,11 @@ tests/                  the Qodo verdict parser's fixtures and tests
 
 ## Tests
 
-**58 tests**, all passing.
+**71 tests**, all passing.
 
 | Suite | Count | Covers |
 | --- | --- | --- |
-| `apps/agent/test/project.test.ts` | 30 | Split and trim invariants, ripple-delete arithmetic across tracks, silence removal, transcript windowing, caption merging, undo, media registration and clip placement bounds, and the render lifecycle: one claim per job, and a finished render that a late progress or failure report cannot reopen. |
+| `apps/agent/test/project.test.ts` | 43 | Split and trim invariants, ripple-delete arithmetic across tracks, silence removal, transcript windowing, caption merging, undo, media registration and clip placement bounds, and the render lifecycle: one claim per job, lease expiry so an abandoned render is retryable, the queued-timeline snapshot, a finished render that a late report cannot reopen, HTTP suffix-range parsing, and the path-escape guards on media names and render targets. |
 | `apps/web/src/engine/audio.test.ts` | 10 | Silence detection against injected gaps and sub-threshold room tone, the peak envelope, and tempo recovered from a synthetic click track. |
 | `apps/web/src/engine/compositor.test.ts` | 8 | Which clips are live at a time, source-time mapping through `sourceOffset`, and which clips reach the audio mix. |
 | `apps/web/.../transcript.test.ts` | 6 | Transcript windowing and caption rendering in the editor. |
@@ -452,8 +477,10 @@ Worth stating plainly, because the demo does not make them obvious:
   decoded audio, but `transcribe_clip` reads transcript segments stored on the media rather than
   running ASR. Wiring a real recognizer in is the next gap to close.
 - **Rendering needs the editor open.** The agent queues a render and the browser performs it, so
-  `export_project` from a headless session waits for a page to claim the job. A server-side ffmpeg
-  worker consuming the same queue would fix it without changing any tool signature.
+  `export_project` from a headless session waits for a page to claim the job. A claim carries a
+  60-second lease, so a tab that closes mid-render releases the job rather than stranding it, but
+  something still has to pick it up. A server-side ffmpeg worker consuming the same queue would fix
+  it without changing any tool signature.
 - **Compositing is Canvas2D.** Video, text and audio composite correctly; effects, transitions,
   masks and blend modes have nowhere to live. Those need OpenCut's wgpu compositor, not this one.
 - **Codecs are the browser's.** Import refuses anything Chrome cannot decode, and mp4 audio falls

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 export type ClipKind = "video" | "text" | "audio"
@@ -63,6 +63,9 @@ export type ExportRecord = {
   sizeBytes?: number
   completedAt?: string
   error?: string
+  /** When a worker took the job, and when it last showed a sign of life. */
+  claimedAt?: string
+  heartbeatAt?: string
 }
 
 export type Project = {
@@ -509,6 +512,7 @@ export class ProjectStore {
    * only creates the job; the file appears when the editor posts the bytes back.
    */
   requestExport(format: string, resolution: string, dir: string): ExportRecord {
+    assertRenderTarget(format, resolution)
     const missing = this.missingMedia()
     if (missing.length > 0) {
       throw new Error(
@@ -529,15 +533,26 @@ export class ProjectStore {
       fps: this.project.fps,
       createdAt: new Date().toISOString(),
       durationSeconds: this.project.duration,
-      file: join(dir, `${this.project.name.replace(/\s+/g, "-").toLowerCase()}-${resolution}-exp${n}.${format}`),
+      file: join(dir, `${slug(this.project.name)}-${resolution}-exp${n}.${format}`),
       status: "pending",
       progress: 0,
     }
     mkdirSync(dir, { recursive: true })
+    // The render must be of the timeline as it was approved, not of whatever it has become by
+    // the time an editor picks the job up, so the project is frozen here beside the job.
+    writeFileSync(snapshotPath(rec), JSON.stringify(this.project, null, 2))
     this.commit("export_project", `Queued a ${resolution} ${format} render`, (p) => {
       p.exports.push(rec)
     })
     return rec
+  }
+
+  /** The timeline as it stood when a render was queued. */
+  exportSnapshot(id: string): Project {
+    const rec = this.getExport(id)
+    const path = snapshotPath(rec)
+    if (!existsSync(path)) throw new Error(`Export ${id} has no snapshot; it cannot be rendered faithfully.`)
+    return JSON.parse(readFileSync(path, "utf8")) as Project
   }
 
   /** Clips whose source media has no bytes on disk. Nothing can be rendered from those. */
@@ -556,9 +571,9 @@ export class ProjectStore {
     return structuredClone(rec)
   }
 
-  /** The oldest render the editor has not picked up yet. */
+  /** The oldest render an editor could take: never started, or abandoned mid-flight. */
   pendingExport(): ExportRecord | null {
-    return structuredClone(this.project.exports.find((e) => e.status === "pending") ?? null)
+    return structuredClone(this.project.exports.find(isClaimable) ?? null)
   }
 
   private updateExport(id: string, fn: (rec: ExportRecord) => void, op: string, summary: string) {
@@ -575,16 +590,25 @@ export class ProjectStore {
    */
   claimExport(id: string): ExportRecord | null {
     const rec = this.project.exports.find((e) => e.id === id)
-    if (!rec || rec.status !== "pending") return null
+    if (!rec || !isClaimable(rec)) return null
+    const retry = rec.status === "rendering"
+    const now = new Date().toISOString()
     return this.updateExport(
       id,
       (r) => {
         r.status = "rendering"
         r.progress = 0
+        r.claimedAt = now
+        r.heartbeatAt = now
       },
       "export_claimed",
-      `Started rendering ${id}`,
+      retry ? `Reclaimed abandoned render ${id}` : `Started rendering ${id}`,
     )
+  }
+
+  /** Queued, or claimed by a worker that has gone quiet for longer than the lease. */
+  claimableExports(): ExportRecord[] {
+    return this.project.exports.filter(isClaimable).map((e) => structuredClone(e))
   }
 
   setExportProgress(id: string, progress: number) {
@@ -596,6 +620,7 @@ export class ProjectStore {
       id,
       (rec) => {
         rec.progress = clamped
+        rec.heartbeatAt = new Date().toISOString()
       },
       "export_progress",
       `Rendering ${id}: ${Math.round(clamped * 100)}%`,
@@ -616,6 +641,10 @@ export class ProjectStore {
     mkdirSync(dirname(rec.file), { recursive: true })
     renameSync(uploadedPath, rec.file)
     const sizeBytes = statSync(rec.file).size
+    // The snapshot exists so an abandoned render can be retried faithfully. Done is terminal,
+    // so it has nothing left to serve.
+    const snapshot = snapshotPath(rec)
+    if (existsSync(snapshot)) unlinkSync(snapshot)
     return this.updateExport(
       id,
       (r) => {
@@ -646,14 +675,50 @@ export class ProjectStore {
   }
 }
 
+/**
+ * How long a claimed render may go silent before another editor may take it over.
+ *
+ * Without this a tab that is closed mid-render strands the job in `rendering` forever: only
+ * the worker that claimed it can report failure, and it is gone.
+ */
+export const RENDER_LEASE_MS = 60_000
+
+export function isClaimable(rec: ExportRecord, now = Date.now()): boolean {
+  if (rec.status === "pending") return true
+  if (rec.status !== "rendering") return false
+  const last = Date.parse(rec.heartbeatAt ?? rec.claimedAt ?? rec.createdAt)
+  return Number.isFinite(last) && now - last > RENDER_LEASE_MS
+}
+
+const snapshotPath = (rec: ExportRecord) => `${rec.file}.project.json`
+
 /** Render sizes are 16:9, matching the editor's preview. */
+const SIZES: Record<string, { width: number; height: number }> = {
+  "720p": { width: 1280, height: 720 },
+  "1080p": { width: 1920, height: 1080 },
+  "4k": { width: 3840, height: 2160 },
+}
+
+const FORMATS = new Set(["mp4", "webm"])
+
 export function resolutionToSize(resolution: string): { width: number; height: number } {
-  switch (resolution) {
-    case "720p":
-      return { width: 1280, height: 720 }
-    case "4k":
-      return { width: 3840, height: 2160 }
-    default:
-      return { width: 1920, height: 1080 }
-  }
+  const size = SIZES[resolution]
+  if (!size) throw new Error(`Unknown resolution "${resolution}". Use one of: ${Object.keys(SIZES).join(", ")}.`)
+  return size
+}
+
+/**
+ * Both of these end up inside the output path. The MCP tool constrains them with zod, but the
+ * HTTP route does not, and `join` happily normalizes `../` out of a directory, so they are
+ * checked against the allowed sets here where the path is actually built.
+ */
+function assertRenderTarget(format: string, resolution: string) {
+  if (!FORMATS.has(format)) throw new Error(`Unknown format "${format}". Use one of: ${[...FORMATS].join(", ")}.`)
+  resolutionToSize(resolution)
+}
+
+/** The project name is part of the file name, so it is reduced to a safe slug. */
+function slug(name: string): string {
+  const cleaned = name.replace(/[^a-zA-Z0-9-_ ]/g, "").trim().replace(/\s+/g, "-").toLowerCase()
+  return cleaned.slice(0, 60) || "project"
 }

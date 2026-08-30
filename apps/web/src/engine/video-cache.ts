@@ -1,4 +1,5 @@
 import { CanvasSink, type WrappedCanvas } from "mediabunny"
+import { fireAndForget } from "#/lib/async"
 import { inputFor } from "./media"
 
 type SinkData = {
@@ -55,7 +56,7 @@ export class VideoCache {
   clear(name?: string) {
     const names = name ? [name] : [...this.sinks.keys()]
     for (const key of names) {
-      void this.sinks.get(key)?.iterator?.return()
+      fireAndForget(this.sinks.get(key)?.iterator?.return())
       this.sinks.delete(key)
       this.initPromises.delete(key)
       this.frameChain.delete(key)

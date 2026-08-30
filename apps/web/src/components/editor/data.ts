@@ -57,6 +57,8 @@ export type ExportRecord = {
   sizeBytes?: number
   completedAt?: string
   error?: string
+  claimedAt?: string
+  heartbeatAt?: string
 }
 
 export type Project = {
