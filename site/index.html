@@ -1,0 +1,918 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EditAI: talk to your timeline</title>
+<meta name="description" content="EditAI is an AI agent harness for video. Ask for the cut, the motion graphic, the filter or the noise gate; an agent makes the edit on your real timeline through 16 MCP tools, and stops for your approval before anything destructive.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f0f10'/%3E%3Cpath d='M18 18h28v7H26v7h17v7H26v7h20v7H18z' fill='%23ffffff'/%3E%3Ccircle cx='50' cy='16' r='5' fill='%237c5cff'/%3E%3C/svg%3E">
+<meta property="og:type" content="website">
+<meta property="og:title" content="EditAI: talk to your timeline">
+<meta property="og:description" content="An AI agent that edits your real timeline. Cuts, captions, motion graphics, filters and the ffmpeg encode itself, driven by 16 MCP tools inside a sandbox.">
+<meta property="og:url" content="https://editai-agent.vercel.app">
+<link rel="canonical" href="https://editai-agent.vercel.app">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0b0b0d">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..900&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ── tokens ─────────────────────────────────────────────────────────────
+   Every colour here is lifted from the editor itself: the well and panel
+   greys, the warm off-white, the violet from the favicon, and the three
+   clip colours the timeline paints video, text and audio with.          */
+:root{
+  --well:#0b0b0d; --surface:#141416; --panel:#1c1c1f; --panel-2:#232327;
+  --line:rgba(235,233,228,.10); --line-2:rgba(235,233,228,.18);
+  --fg:#ebe9e4; --fg-dim:#9d9a94; --fg-faint:#6b6863;
+  --violet:#7c5cff; --violet-lo:rgba(124,92,255,.14); --violet-mid:rgba(124,92,255,.34);
+  --video:#3aa39b; --text:#e0a63b; --audio:#5fae63;
+  --display:'Archivo',system-ui,sans-serif;
+  --body:'Inter',system-ui,-apple-system,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  --rail:76px; --slate:52px;
+  --ease:cubic-bezier(.22,.61,.36,1);
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--well); color:var(--fg);
+  font-family:var(--body); font-size:16px; line-height:1.6;
+  -webkit-font-smoothing:antialiased; overflow-x:hidden;
+}
+a{color:inherit}
+::selection{background:var(--violet-mid); color:#fff}
+:focus-visible{outline:2px solid var(--violet); outline-offset:3px; border-radius:3px}
+
+/* ── slate: the sticky bar, read like a source monitor header ────────── */
+.slate{
+  position:fixed; inset:0 0 auto 0; height:var(--slate); z-index:60;
+  display:flex; align-items:center; gap:20px; padding:0 20px;
+  background:rgba(11,11,13,.78); backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--line);
+}
+.slate__mark{display:flex; align-items:center; gap:9px; font-weight:600; letter-spacing:-.01em}
+.slate__mark svg{display:block}
+.slate__tc{
+  font-family:var(--mono); font-size:12px; letter-spacing:.04em;
+  color:var(--fg-dim); font-variant-numeric:tabular-nums;
+  padding:4px 9px; border:1px solid var(--line); border-radius:5px;
+  background:var(--panel);
+}
+.slate__spacer{flex:1}
+.slate__links{display:flex; align-items:center; gap:6px}
+.slate__link{
+  font-family:var(--mono); font-size:12px; text-decoration:none; color:var(--fg-dim);
+  padding:7px 11px; border-radius:6px; transition:color .18s, background .18s;
+}
+.slate__link:hover{color:var(--fg); background:var(--panel)}
+.slate__cta{
+  font-family:var(--mono); font-size:12px; text-decoration:none;
+  color:#fff; background:var(--violet); padding:8px 14px; border-radius:6px;
+  font-weight:500; transition:filter .18s, transform .18s;
+}
+.slate__cta:hover{filter:brightness(1.12); transform:translateY(-1px)}
+
+/* ── rail: a scrub ruler down the left edge, playhead follows scroll ─── */
+.rail{
+  position:fixed; left:0; top:var(--slate); bottom:0; width:var(--rail); z-index:50;
+  border-right:1px solid var(--line); pointer-events:none;
+  background:linear-gradient(180deg,var(--well),var(--surface));
+}
+.rail__ticks{position:absolute; inset:0; opacity:.5;
+  background-image:repeating-linear-gradient(180deg,var(--line-2) 0 1px,transparent 1px 28px);
+  background-position:0 0; background-size:14px 28px; background-repeat:repeat-y;
+}
+.rail__head{position:absolute; left:0; right:0; top:0; will-change:transform}
+.rail__head::before{content:''; position:absolute; left:0; right:-1px; top:0; height:1px; background:var(--violet)}
+.rail__dot{
+  position:absolute; right:-4px; top:-3px; width:7px; height:7px; border-radius:50%;
+  background:var(--violet); box-shadow:0 0 0 4px var(--violet-lo);
+}
+.rail__tc{
+  position:absolute; left:11px; top:9px; font-family:var(--mono); font-size:10px;
+  letter-spacing:.06em; color:var(--violet); font-variant-numeric:tabular-nums;
+}
+
+/* ── page grid ──────────────────────────────────────────────────────── */
+.page{margin-left:var(--rail); padding-top:var(--slate)}
+.wrap{max-width:1080px; margin:0 auto; padding:0 40px}
+
+/* ── shots: each section is a shot in the reel ──────────────────────── */
+.shot{padding:104px 0; border-top:1px solid var(--line); position:relative}
+.shot--hero{padding:58px 0 92px; border-top:0}
+.shot--end{border-top:1px solid var(--line-2)}
+.shot__slug{
+  display:flex; align-items:baseline; gap:14px; margin-bottom:26px;
+  font-family:var(--mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase;
+}
+.shot__tc{color:var(--violet); font-variant-numeric:tabular-nums}
+.shot__name{color:var(--fg-faint)}
+.shot__rule{flex:1; height:1px; background:var(--line); align-self:center}
+
+h1,h2,h3{margin:0; font-family:var(--display); font-weight:800; line-height:.92;
+  letter-spacing:-.02em; font-stretch:118%; text-transform:uppercase}
+h1{font-size:clamp(46px,8.6vw,98px)}
+h2{font-size:clamp(30px,4.6vw,52px); margin-bottom:18px}
+h3{font-size:15px; font-weight:700; letter-spacing:.01em; font-stretch:112%; line-height:1.25}
+.lede{font-size:clamp(16px,1.7vw,19px); color:var(--fg-dim); max-width:62ch; margin:22px 0 0}
+.lede strong{color:var(--fg); font-weight:500}
+.note{font-size:14px; color:var(--fg-faint); max-width:66ch}
+.mono{font-family:var(--mono)}
+
+/* ── hero ────────────────────────────────────────────────────────────── */
+.hero__head{max-width:15ch}
+.hero__head .kick{display:block; color:var(--fg-faint)}
+.hero__lede{margin-top:22px}
+
+/* the signature: a real timeline that performs the edit you ask it for */
+.deck{
+  margin-top:36px; border:1px solid var(--line-2); border-radius:12px;
+  background:var(--surface); overflow:hidden;
+  box-shadow:0 30px 70px -40px rgba(0,0,0,.9);
+}
+.deck__prompt{
+  display:flex; align-items:center; gap:12px; padding:15px 18px;
+  border-bottom:1px solid var(--line); background:var(--panel);
+}
+.deck__caret{color:var(--violet); font-family:var(--mono); font-size:14px; flex:none}
+.deck__typed{
+  font-family:var(--mono); font-size:14px; color:var(--fg); flex:1;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0;
+}
+.deck__typed::after{
+  content:''; display:inline-block; width:7px; height:15px; margin-left:3px;
+  background:var(--violet); vertical-align:-3px; animation:blink 1.05s steps(1) infinite;
+}
+.deck.is-done .deck__typed::after{display:none}
+@keyframes blink{50%{opacity:0}}
+.deck__key{
+  font-family:var(--mono); font-size:11px; color:var(--fg-faint); flex:none;
+  border:1px solid var(--line-2); border-radius:4px; padding:3px 7px;
+}
+
+.deck__tracks{padding:20px 18px 8px; display:grid; gap:9px}
+.trk{display:grid; grid-template-columns:34px 1fr; align-items:center; gap:12px}
+.trk__id{
+  font-family:var(--mono); font-size:10px; color:var(--fg-faint);
+  letter-spacing:.1em; text-align:right;
+}
+.trk__lane{
+  position:relative; height:40px; border-radius:5px;
+  background:var(--well); border:1px solid var(--line);
+}
+.trk--text .trk__lane{height:26px}
+.clip{
+  position:absolute; top:3px; bottom:3px; border-radius:3px; overflow:hidden;
+  transition:left .95s var(--ease), width .95s var(--ease);
+  display:flex; align-items:center; padding:0 7px;
+  font-family:var(--mono); font-size:9px; letter-spacing:.02em;
+  color:rgba(0,0,0,.68); font-weight:500; white-space:nowrap;
+}
+.clip--video{background:var(--video)}
+.clip--audio{background:var(--audio)}
+.clip--text{background:var(--text)}
+/* the waveform is drawn, not decorative: it is why the silences read as gaps */
+.clip--audio::after{
+  content:''; position:absolute; inset:0; opacity:.4;
+  background:repeating-linear-gradient(90deg,rgba(0,0,0,.55) 0 1px,transparent 1px 4px);
+  -webkit-mask-image:linear-gradient(180deg,transparent 12%,#000 32%,#000 68%,transparent 88%);
+  mask-image:linear-gradient(180deg,transparent 12%,#000 32%,#000 68%,transparent 88%);
+}
+.gap{
+  position:absolute; top:-2px; bottom:-2px; border-radius:3px;
+  background:var(--violet-lo); border:1px dashed var(--violet-mid);
+  opacity:0; transition:opacity .3s, transform .35s var(--ease);
+}
+.deck.is-marking .gap{opacity:1}
+.deck.is-cut .gap{opacity:0; transform:scaleX(.02)}
+
+.deck__foot{
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  padding:13px 18px; border-top:1px solid var(--line); background:var(--panel);
+  font-family:var(--mono); font-size:12px; color:var(--fg-dim);
+}
+.deck__status{display:flex; align-items:center; gap:8px; min-width:0}
+.dot{width:6px; height:6px; border-radius:50%; background:var(--violet); flex:none;
+  animation:pulse 1.6s var(--ease) infinite}
+.deck.is-done .dot{animation:none; background:var(--audio)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.deck__dur{margin-left:auto; color:var(--fg); font-variant-numeric:tabular-nums; flex:none}
+.deck__dur s{color:var(--fg-faint); text-decoration-color:var(--violet)}
+.approve{
+  font-family:var(--mono); font-size:11px; color:#fff; background:var(--violet);
+  border:0; border-radius:5px; padding:6px 12px; cursor:pointer;
+  opacity:0; pointer-events:none; transition:opacity .25s, transform .25s;
+}
+.deck.is-asking .approve{opacity:1; pointer-events:auto}
+.approve.is-hit{transform:scale(.93)}
+.replay{
+  font-family:var(--mono); font-size:11px; color:var(--fg-dim); background:transparent;
+  border:1px solid var(--line-2); border-radius:5px; padding:6px 12px; cursor:pointer;
+  opacity:0; pointer-events:none; transition:opacity .25s, color .18s, border-color .18s;
+}
+.deck.is-done .replay{opacity:1; pointer-events:auto}
+.replay:hover{color:var(--fg); border-color:var(--fg-faint)}
+
+/* ── generic layout pieces ──────────────────────────────────────────── */
+.cols{display:grid; gap:18px; margin-top:38px}
+.cols--3{grid-template-columns:repeat(3,1fr)}
+.cols--2{grid-template-columns:repeat(2,1fr)}
+.card{
+  padding:22px; border:1px solid var(--line); border-radius:10px; background:var(--surface);
+  display:flex; flex-direction:column; transition:border-color .2s, background .2s;
+}
+.card:hover{border-color:var(--line-2); background:var(--panel)}
+.card__tag{
+  font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--fg-faint); display:block; margin-bottom:12px;
+}
+.card p{margin:9px 0 16px; font-size:14px; color:var(--fg-dim); line-height:1.62}
+.card__tools{
+  margin-top:auto; padding-top:13px; border-top:1px solid var(--line);
+  font-family:var(--mono); font-size:11px; color:var(--fg-faint);
+}
+.card__fn{font-family:var(--mono); font-size:14px; font-weight:500; font-stretch:100%;
+  text-transform:none; letter-spacing:0; color:var(--fg)}
+.swatch{display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:7px; vertical-align:0}
+.sw--video{background:var(--video)} .sw--audio{background:var(--audio)} .sw--text{background:var(--text)}
+.sw--violet{background:var(--violet)}
+
+/* prompt cards: the ask on top, what actually ran underneath */
+.asks{display:grid; grid-template-columns:repeat(2,1fr); gap:0; margin-top:38px;
+  border:1px solid var(--line); border-radius:10px; overflow:hidden}
+.ask{padding:24px; border-right:1px solid var(--line); border-bottom:1px solid var(--line);
+  background:var(--surface); transition:background .2s}
+.ask:hover{background:var(--panel)}
+.ask:nth-child(2n){border-right:0}
+.ask:nth-last-child(-n+2){border-bottom:0}
+.ask__q{
+  font-family:var(--mono); font-size:14px; color:var(--fg); display:flex; gap:9px;
+  align-items:baseline; line-height:1.45;
+}
+.ask__q span{color:var(--violet); flex:none}
+.ask__a{margin:12px 0 0; font-size:14px; color:var(--fg-dim); line-height:1.62}
+.ask__t{margin-top:13px; font-family:var(--mono); font-size:11px; color:var(--fg-faint)}
+
+/* the chat beat: adding a tool mid-conversation */
+.thread{margin-top:34px; display:grid; gap:11px; max-width:640px}
+.msg{padding:14px 17px; border-radius:13px; font-size:15px; line-height:1.55; max-width:88%}
+.msg--them{background:var(--panel); border:1px solid var(--line); border-bottom-left-radius:4px}
+.msg--you{background:var(--violet); color:#fff; justify-self:end; border-bottom-right-radius:4px}
+.msg__who{
+  display:block; font-family:var(--mono); font-size:10px; letter-spacing:.13em;
+  text-transform:uppercase; opacity:.6; margin-bottom:5px;
+}
+
+pre{
+  margin:24px 0 0; padding:17px 19px; border:1px solid var(--line); border-radius:9px;
+  background:var(--surface); overflow-x:auto; font-family:var(--mono); font-size:12.5px;
+  line-height:1.75; color:var(--fg-dim);
+}
+pre b{color:var(--fg); font-weight:500}
+pre .c{color:var(--fg-faint)}
+pre .v{color:var(--violet)}
+
+/* the review ledger */
+.ledger{margin-top:38px; border:1px solid var(--line); border-radius:10px; overflow:hidden}
+.ledger__row{
+  display:grid; grid-template-columns:74px 1fr 96px; gap:18px; align-items:baseline;
+  padding:17px 20px; border-bottom:1px solid var(--line); background:var(--surface);
+}
+.ledger__row:last-child{border-bottom:0}
+.ledger__pr{font-family:var(--mono); font-size:12px; color:var(--fg-faint)}
+.ledger__what{font-size:14px; color:var(--fg-dim); line-height:1.6}
+.ledger__what b{color:var(--fg); font-weight:500}
+.ledger__verdict{font-family:var(--mono); font-size:11px; text-align:right; letter-spacing:.04em}
+.v--fixed{color:var(--audio)} .v--rejected{color:var(--text)}
+
+.tally{display:flex; gap:34px; flex-wrap:wrap; margin-top:32px}
+.tally__n{font-family:var(--display); font-size:44px; font-weight:800; font-stretch:118%;
+  line-height:1; display:block}
+.tally__l{font-family:var(--mono); font-size:11px; color:var(--fg-faint); letter-spacing:.1em;
+  text-transform:uppercase; margin-top:8px; display:block}
+
+/* outro */
+.outro{text-align:center; padding:120px 0 130px}
+.outro h2{font-size:clamp(32px,6vw,72px); margin-bottom:22px}
+.outro .lede{margin:0 auto}
+.btns{display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:34px}
+.btn{
+  font-family:var(--mono); font-size:13px; text-decoration:none; padding:13px 22px;
+  border-radius:7px; transition:filter .18s, transform .18s, border-color .18s, color .18s;
+}
+.btn--primary{background:var(--violet); color:#fff; font-weight:500}
+.btn--primary:hover{filter:brightness(1.12); transform:translateY(-1px)}
+.btn--ghost{border:1px solid var(--line-2); color:var(--fg-dim)}
+.btn--ghost:hover{color:var(--fg); border-color:var(--fg-faint)}
+
+footer{
+  border-top:1px solid var(--line); padding:28px 0 44px;
+  display:flex; gap:16px; flex-wrap:wrap; align-items:center;
+  font-family:var(--mono); font-size:11.5px; color:var(--fg-faint);
+}
+footer a{color:var(--fg-dim); text-decoration:none}
+footer a:hover{color:var(--fg)}
+footer .sp{flex:1}
+
+/* ── reveal on scroll ───────────────────────────────────────────────── */
+.rv{opacity:0; transform:translateY(16px); transition:opacity .7s var(--ease), transform .7s var(--ease)}
+.rv.in{opacity:1; transform:none}
+
+/* ── responsive ─────────────────────────────────────────────────────── */
+@media (max-width:900px){
+  :root{--rail:0px}
+  .rail{display:none}
+  .rail-mobile{position:fixed; top:var(--slate); left:0; height:2px; z-index:55; background:var(--violet); width:0}
+  .wrap{padding:0 22px}
+  .shot{padding:74px 0}
+  .cols--3,.cols--2{grid-template-columns:1fr}
+  .asks{grid-template-columns:1fr}
+  .ask{border-right:0}
+  .ask:nth-last-child(-n+2){border-bottom:1px solid var(--line)}
+  .ask:last-child{border-bottom:0}
+  .ledger__row{grid-template-columns:1fr; gap:7px}
+  .ledger__verdict{text-align:left}
+  .slate__links .slate__link{display:none}
+  .msg{max-width:96%}
+}
+@media (min-width:901px){.rail-mobile{display:none}}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important; animation-iteration-count:1!important;
+    transition-duration:.001ms!important; scroll-behavior:auto!important}
+  .rv{opacity:1; transform:none}
+}
+</style>
+</head>
+<body>
+
+<header class="slate">
+  <span class="slate__mark">
+    <svg width="20" height="20" viewBox="0 0 64 64" aria-hidden="true">
+      <rect width="64" height="64" rx="14" fill="#1c1c1f"/>
+      <path d="M18 18h28v7H26v7h17v7H26v7h20v7H18z" fill="#ebe9e4"/>
+      <circle cx="50" cy="16" r="5" fill="#7c5cff"/>
+    </svg>
+    EditAI
+  </span>
+  <span class="slate__tc" id="tc-slate">00:00:00:00</span>
+  <span class="slate__spacer"></span>
+  <nav class="slate__links">
+    <a class="slate__link" href="#say">What you can ask</a>
+    <a class="slate__link" href="#tools">Add a tool</a>
+    <a class="slate__link" href="#review">Reviews</a>
+  </nav>
+  <a class="slate__cta" href="https://github.com/deonmenezes/edit-ai">GitHub</a>
+</header>
+
+<div class="rail" aria-hidden="true">
+  <div class="rail__ticks"></div>
+  <div class="rail__head" id="rail-head"><i class="rail__dot"></i><span class="rail__tc" id="tc-rail">00:00</span></div>
+</div>
+<div class="rail-mobile" id="rail-mobile" aria-hidden="true"></div>
+
+<main class="page">
+<div class="wrap">
+
+  <!-- ── hero ───────────────────────────────────────────────────────── -->
+  <section class="shot shot--hero">
+    <div class="shot__slug">
+      <span class="shot__tc">00:00:00</span>
+      <span class="shot__name">Cold open</span>
+      <span class="shot__rule"></span>
+    </div>
+
+    <h1 class="hero__head">Talk<span class="kick">to your</span>timeline</h1>
+
+    <p class="lede hero__lede">
+      EditAI is an <strong>AI harness for video editing</strong>. Ask for the cut, the motion
+      graphic, the filter or the noise gate. An agent makes the edit on your real timeline
+      through 16 MCP tools, and stops for your approval before anything destructive.
+    </p>
+
+    <!-- the signature: not a screenshot of an edit, the edit -->
+    <div class="deck" id="deck">
+      <div class="deck__prompt">
+        <span class="deck__caret" aria-hidden="true">&#9656;</span>
+        <span class="deck__typed" id="typed"></span>
+        <span class="deck__key">&#8984;&#9166;</span>
+      </div>
+
+      <div class="deck__tracks" id="tracks">
+        <div class="trk"><span class="trk__id">V1</span><div class="trk__lane" data-lane="V1"></div></div>
+        <div class="trk"><span class="trk__id">A1</span><div class="trk__lane" data-lane="A1"></div></div>
+        <div class="trk trk--text"><span class="trk__id">T1</span><div class="trk__lane" data-lane="T1"></div></div>
+      </div>
+
+      <div class="deck__foot">
+        <span class="deck__status"><i class="dot"></i><span id="status">Waiting for an instruction</span></span>
+        <button class="approve" id="approve" type="button">Approve the cut</button>
+        <button class="replay" id="replay" type="button">Run it again</button>
+        <span class="deck__dur" id="dur">24.0s</span>
+      </div>
+    </div>
+
+    <p class="note" style="margin-top:16px">
+      Real behaviour, real numbers: <span class="mono">find_silences</span> then
+      <span class="mono">ripple_delete</span> across every track, 24.0s down to 21.1s, which is
+      exactly the 2.9 seconds of dead air. Nothing is cut until you approve it, and every edit undoes.
+    </p>
+  </section>
+
+  <!-- ── the handoff ────────────────────────────────────────────────── -->
+  <section class="shot">
+    <div class="shot__slug">
+      <span class="shot__tc">00:00:14</span>
+      <span class="shot__name">The handoff</span>
+      <span class="shot__rule"></span>
+    </div>
+    <h2>Connect the MCP.<br>The agent takes the room.</h2>
+    <p class="lede">
+      Point your client at EditAI's MCP server and an agent comes up inside a sandbox on
+      <strong>TrueForge</strong>, TrueFoundry's open-source agent harness. From there it drives the
+      edit at whichever layer the job needs.
+    </p>
+
+    <div class="cols cols--3">
+      <div class="card rv">
+        <span class="card__tag"><i class="swatch sw--video"></i>Layer one</span>
+        <h3>Your editing UI</h3>
+        <p>Bring your own front end. The timeline is exposed as tools, not as a prompt describing a
+          timeline, so any MCP client can drive it.</p>
+        <div class="card__tools">any MCP client</div>
+      </div>
+      <div class="card rv">
+        <span class="card__tag"><i class="swatch sw--text"></i>Layer two</span>
+        <h3>Our editor</h3>
+        <p>A full timeline, preview and assistant panel. The agent's edits stream in over SSE, so
+          the tracks redraw as the work happens.</p>
+        <div class="card__tools">apps/web &middot; TanStack Start</div>
+      </div>
+      <div class="card rv">
+        <span class="card__tag"><i class="swatch sw--audio"></i>Layer three</span>
+        <h3>The encode itself</h3>
+        <p>When a job needs the real file, the agent writes the ffmpeg filter graph and runs it in a
+          locked-down container.</p>
+        <div class="card__tools">ffmpeg &middot; ffprobe &middot; python</div>
+      </div>
+    </div>
+
+<pre><span class="c"># 1 · the harness</span>
+npx <b>@truefoundry/trueforge@latest</b>          <span class="c">→ localhost:8790</span>
+
+<span class="c"># 2 · the timeline tools</span>
+cd apps/agent &amp;&amp; <b>bun run start</b>            <span class="c">→ localhost:8941</span>
+
+<span class="c"># 3 · wire them together (any one key is enough)</span>
+<span class="v">ANTHROPIC_API_KEY</span>=sk-... <b>bun run setup</b>
+
+<span class="c"># 4 · the editor</span>
+<b>bun run dev:web</b>                           <span class="c">→ localhost:5173</span></pre>
+  </section>
+
+  <!-- ── say it ─────────────────────────────────────────────────────── -->
+  <section class="shot" id="say">
+    <div class="shot__slug">
+      <span class="shot__tc">00:00:36</span>
+      <span class="shot__name">Say it</span>
+      <span class="shot__rule"></span>
+    </div>
+    <h2>Ask in a sentence.<br>Watch the tracks move.</h2>
+    <p class="lede">
+      Every ask below runs real tools against real state. Clip ids, source offsets and frame
+      boundaries are the agent's problem, not yours.
+    </p>
+
+    <div class="asks">
+      <div class="ask rv">
+        <p class="ask__q"><span>&#9656;</span>Remove the silences</p>
+        <p class="ask__a">Finds every silent range on the voice track, tells you what will go, and
+          ripple-deletes it across all tracks so the gaps close.</p>
+        <p class="ask__t">find_silences &rarr; remove_silences</p>
+      </div>
+      <div class="ask rv">
+        <p class="ask__q"><span>&#9656;</span>Caption every clip</p>
+        <p class="ask__a">Fans out one sub-agent per clip to transcribe in parallel, merges the
+          results, and lays timed captions on their own track.</p>
+        <p class="ask__t">transcribe_clip &times; N &rarr; add_captions</p>
+      </div>
+      <div class="ask rv">
+        <p class="ask__q"><span>&#9656;</span>Cut this to the beat</p>
+        <p class="ask__a">Reads the tempo off the music track and splits on the beat grid, both
+          halves still frame-accurate.</p>
+        <p class="ask__t">detect_beats &rarr; split_clip</p>
+      </div>
+      <div class="ask rv">
+        <p class="ask__q"><span>&#9656;</span>Duck the music under the voiceover</p>
+        <p class="ask__a">Sets clip volume where the voice track is speaking and puts it back
+          where it is not.</p>
+        <p class="ask__t">get_project &rarr; set_volume</p>
+      </div>
+      <div class="ask rv">
+        <p class="ask__q"><span>&#9656;</span>Grade it warmer and add grain</p>
+        <p class="ask__a">Writes the ffmpeg filter graph, runs it in the media sandbox, then probes
+          the output to confirm it is what you asked for.</p>
+        <p class="ask__t">probe_media &rarr; run_ffmpeg</p>
+      </div>
+      <div class="ask rv">
+        <p class="ask__q"><span>&#9656;</span>Kill the room tone</p>
+        <p class="ask__a">Denoises the voice track in the sandbox and leaves the original file
+          untouched next to it.</p>
+        <p class="ask__t">run_ffmpeg &middot; afftdn</p>
+      </div>
+    </div>
+
+    <p class="note" style="margin-top:24px">
+      Sixteen timeline tools in all. Five read, seven write and undo, three destructive, one gated
+      export. The destructive ones carry MCP's <span class="mono">destructiveHint</span>, which is
+      what makes the harness stop and ask you first.
+    </p>
+  </section>
+
+  <!-- ── pull it in ─────────────────────────────────────────────────── -->
+  <section class="shot">
+    <div class="shot__slug">
+      <span class="shot__tc">00:00:58</span>
+      <span class="shot__name">Pull it in</span>
+      <span class="shot__rule"></span>
+    </div>
+    <h2>Need a logo?<br>It goes and gets one.</h2>
+    <p class="lede">
+      The agent reaches the live web through <strong>Bright Data</strong>, so a logo, a product shot
+      or a reference frame is one sentence away from being on your timeline. The connector attaches
+      deferred: it costs no context until a task actually needs it.
+    </p>
+    <div class="cols cols--2">
+      <div class="card rv">
+        <span class="card__tag"><i class="swatch sw--violet"></i>Find it</span>
+        <h3 class="card__fn">search_engine</h3>
+        <p>Live search results, not a training-set memory of what a brand looked like two years ago.</p>
+      </div>
+      <div class="card rv">
+        <span class="card__tag"><i class="swatch sw--violet"></i>Take it</span>
+        <h3 class="card__fn">scrape_as_markdown</h3>
+        <p>Pulls the page down clean, so the agent can lift the asset and the copy around it.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── add a tool ─────────────────────────────────────────────────── -->
+  <section class="shot" id="tools">
+    <div class="shot__slug">
+      <span class="shot__tc">00:01:16</span>
+      <span class="shot__name">Add a tool mid-call</span>
+      <span class="shot__rule"></span>
+    </div>
+    <h2>A new skill is a<br>line in a config.</h2>
+
+    <div class="thread">
+      <div class="msg msg--them rv">
+        <span class="msg__who">On the call</span>
+        Bro, can you add an MCP for motion graphics? I want to use it in this video.
+      </div>
+      <div class="msg msg--you rv">
+        <span class="msg__who">You</span>
+        Sent to your agent.
+      </div>
+    </div>
+
+    <p class="lede" style="margin-top:28px">
+      Every capability here is an MCP server, so adding one is a name in a list and a restart, not a
+      release. The agent picks up the new tools on its next turn and starts using them in the same
+      conversation.
+    </p>
+
+<pre><span class="v">EDITAI_CONNECTORS</span>=exa,bright-data,<b>motion-graphics</b> bun run setup
+
+<span class="c">✓ motion-graphics   attached   read-only, deferred</span>
+<span class="c">✓ agent updated     14 connectors → tools live on the next turn</span></pre>
+
+    <p class="note" style="margin-top:20px">
+      Catalog servers attach by name, OAuth ones authorise in chat, and anything you host yourself
+      attaches the same way. Read-only and deferred by default, so a connector you rarely use does
+      not crowd the agent's context.
+    </p>
+  </section>
+
+  <!-- ── sandboxes ──────────────────────────────────────────────────── -->
+  <section class="shot">
+    <div class="shot__slug">
+      <span class="shot__tc">00:01:34</span>
+      <span class="shot__name">Where it runs</span>
+      <span class="shot__rule"></span>
+    </div>
+    <h2>Nothing the agent<br>writes runs on your box.</h2>
+    <p class="lede">
+      Two sandboxes, because the two kinds of work need different boundaries.
+    </p>
+    <div class="cols cols--2">
+      <div class="card rv">
+        <span class="card__tag">Daytona</span>
+        <h3>Harness sandbox</h3>
+        <p>For the computation the agent should not estimate: arithmetic, parsing, anything it
+          would otherwise guess at. Runs remotely, registered the moment the key is present.</p>
+        <div class="card__tools">exit 0 &middot; 338350</div>
+      </div>
+      <div class="card rv">
+        <span class="card__tag">Container</span>
+        <h3>Media sandbox</h3>
+        <p>Every ffmpeg call runs in a throwaway container: no network, capped memory and CPU, 256
+          pids, non-root, one mounted workspace, hard timeout. Python there asks for approval first,
+          because a script with the workspace mounted can delete your source media.</p>
+        <div class="card__tools">--network none &middot; --pids-limit 256</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── reviews ────────────────────────────────────────────────────── -->
+  <section class="shot" id="review">
+    <div class="shot__slug">
+      <span class="shot__tc">00:01:52</span>
+      <span class="shot__name">Reviewed by Qodo</span>
+      <span class="shot__rule"></span>
+    </div>
+    <h2>Every line here was<br>reviewed by Qodo.</h2>
+    <p class="lede">
+      Not a badge. Eight findings across three reviews, each one either fixed or answered with a
+      proof, and a merge gate that reads Qodo's structured verdict rather than its prose.
+    </p>
+
+    <div class="tally">
+      <span class="rv"><b class="tally__n">8</b><span class="tally__l">Findings raised</span></span>
+      <span class="rv"><b class="tally__n" style="color:var(--audio)">7</b><span class="tally__l">Real, fixed</span></span>
+      <span class="rv"><b class="tally__n" style="color:var(--text)">1</b><span class="tally__l">Checked, rejected</span></span>
+      <span class="rv"><b class="tally__n" style="color:var(--violet)">5</b><span class="tally__l">Regression tests added</span></span>
+    </div>
+
+    <div class="ledger">
+      <div class="ledger__row rv">
+        <span class="ledger__pr">PR #3</span>
+        <span class="ledger__what"><b>Duplicate clip ids after repeated ripple deletes.</b> A clip
+          cut twice produced the same id twice, breaking lookup, deletion and React keys. The test
+          suite had missed it because the existing test asserted the buggy id as correct.</span>
+        <span class="ledger__verdict v--fixed">FIXED</span>
+      </div>
+      <div class="ledger__row rv">
+        <span class="ledger__pr">PR #3</span>
+        <span class="ledger__what"><b>Export announced before the file existed.</b> The record was
+          committed, notifying subscribers, and only then was the file written.</span>
+        <span class="ledger__verdict v--fixed">FIXED</span>
+      </div>
+      <div class="ledger__row rv">
+        <span class="ledger__pr">PR #3</span>
+        <span class="ledger__what"><b>Session restore leaked its stream on unmount.</b> It set state
+          on a gone component and left the connection open.</span>
+        <span class="ledger__verdict v--fixed">FIXED</span>
+      </div>
+      <div class="ledger__row rv">
+        <span class="ledger__pr">PR #3</span>
+        <span class="ledger__what"><b>Setup posted API keys over plaintext HTTP.</b> It now refuses
+          to do that to anything but localhost.</span>
+        <span class="ledger__verdict v--fixed">FIXED</span>
+      </div>
+      <div class="ledger__row rv">
+        <span class="ledger__pr">PR #3</span>
+        <span class="ledger__what"><b>The trim bound was called wrong, and was not.</b> The source
+          expression expands to the correct source time; the code accepts exactly up to the limit
+          and rejects one frame past it. Two tests now pin that boundary.</span>
+        <span class="ledger__verdict v--rejected">REJECTED</span>
+      </div>
+      <div class="ledger__row rv">
+        <span class="ledger__pr">PR #2</span>
+        <span class="ledger__what"><b>Sandboxed Python could delete the source media.</b> The
+          argument guard could not catch it, and the container is no defence, since the workspace is
+          exactly what it is meant to reach. The tool now asks for approval first.</span>
+        <span class="ledger__verdict v--fixed">FIXED</span>
+      </div>
+    </div>
+
+    <p class="note" style="margin-top:22px">
+      Qodo publishes no check run and no approving review, so GitHub's own auto-merge has nothing to
+      gate on. The workflow in this repo is that missing gate: it reads only the structured counter
+      chips, never the prose, because Qodo quotes findings verbatim and a pull request can put the
+      words "no issues found" into its own diff. It binds the verdict to the reviewed commit and
+      merges with <span class="mono">--match-head-commit</span>, so a push racing the merge is
+      rejected rather than slipped in.
+    </p>
+  </section>
+
+  <!-- ── outro ──────────────────────────────────────────────────────── -->
+  <section class="shot shot--end outro">
+    <h2>And the video you<br>just watched?</h2>
+    <p class="lede">It cut itself.</p>
+    <div class="btns">
+      <a class="btn btn--primary" href="https://github.com/deonmenezes/edit-ai">Read the code</a>
+      <a class="btn btn--ghost" href="https://github.com/deonmenezes/edit-ai#getting-started">Run it locally</a>
+    </div>
+  </section>
+
+  <footer>
+    <span>EditAI</span>
+    <span>MIT licensed</span>
+    <a href="https://github.com/deonmenezes/edit-ai">github.com/deonmenezes/edit-ai</a>
+    <span class="sp"></span>
+    <span>Built on TrueForge &middot; MCP &middot; Bright Data &middot; reviewed by Qodo</span>
+  </footer>
+
+</div>
+</main>
+
+<script>
+(function(){
+  "use strict";
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ── the hero timeline ──────────────────────────────────────────────
+     A 24s project with three silences on the voice track totalling 2.9s.
+     Removing them is a ripple delete: every clip after a gap shifts left,
+     and a clip a gap falls inside gets shorter. mapTime does both.      */
+  var TOTAL = 24.0;
+  var SILENCES = [[3.2, 4.1], [9.6, 10.4], [16.8, 18.0]];
+  var LANES = {
+    V1: {kind:"video", clips:[[0,5,"intro.mp4"],[5,11,"b-roll.mp4"],[11,24,"talking-head.mp4"]]},
+    A1: {kind:"audio", clips:[[0,3.2,""],[4.1,9.6,""],[10.4,16.8,""],[18,24,""]]},
+    T1: {kind:"text",  clips:[[0.5,4,"Hook line"],[20,24,"Subscribe"]]}
+  };
+
+  function mapTime(t){
+    var shift = 0;
+    for (var i = 0; i < SILENCES.length; i++){
+      var a = SILENCES[i][0], b = SILENCES[i][1];
+      if (t >= b) shift += b - a;
+      else if (t > a) shift += t - a;
+    }
+    return t - shift;
+  }
+  var CUT_TOTAL = mapTime(TOTAL); // 21.1
+
+  var deck = document.getElementById("deck");
+  var statusEl = document.getElementById("status");
+  var durEl = document.getElementById("dur");
+  var typedEl = document.getElementById("typed");
+  var approveBtn = document.getElementById("approve");
+  var replayBtn = document.getElementById("replay");
+  var clipEls = [];
+  var gapEls = [];
+
+  function build(){
+    Object.keys(LANES).forEach(function(id){
+      var lane = document.querySelector('[data-lane="' + id + '"]');
+      var spec = LANES[id];
+      spec.clips.forEach(function(c){
+        var el = document.createElement("div");
+        el.className = "clip clip--" + spec.kind;
+        el.textContent = c[2] || "";
+        lane.appendChild(el);
+        clipEls.push({el: el, start: c[0], end: c[1]});
+      });
+      SILENCES.forEach(function(s){
+        var g = document.createElement("div");
+        g.className = "gap";
+        lane.appendChild(g);
+        gapEls.push({el: g, start: s[0], end: s[1]});
+      });
+    });
+  }
+
+  function layout(cut){
+    var scale = cut ? CUT_TOTAL : TOTAL;
+    clipEls.forEach(function(c){
+      var s = cut ? mapTime(c.start) : c.start;
+      var e = cut ? mapTime(c.end) : c.end;
+      c.el.style.left = (s / scale * 100) + "%";
+      c.el.style.width = ((e - s) / scale * 100) + "%";
+    });
+    gapEls.forEach(function(g){
+      var s = cut ? mapTime(g.start) : g.start;
+      var e = cut ? mapTime(g.end) : g.end;
+      g.el.style.left = (s / scale * 100) + "%";
+      g.el.style.width = ((e - s) / scale * 100) + "%";
+    });
+  }
+
+  var PROMPT = "remove the silences";
+  var timers = [];
+  function at(ms, fn){ timers.push(setTimeout(fn, ms)); }
+  function clearAll(){ timers.forEach(clearTimeout); timers = []; }
+
+  function tweenDuration(){
+    if (reduce){ durEl.innerHTML = '<s>24.0s</s> &rarr; 21.1s'; return; }
+    var t0 = performance.now(), span = 900;
+    (function step(now){
+      var p = Math.min(1, (now - t0) / span);
+      var eased = 1 - Math.pow(1 - p, 3);
+      var v = TOTAL + (CUT_TOTAL - TOTAL) * eased;
+      durEl.innerHTML = p < 1 ? v.toFixed(1) + "s"
+        : '<s>24.0s</s> &rarr; 21.1s';
+      if (p < 1) requestAnimationFrame(step);
+    })(performance.now());
+  }
+
+  function finish(){
+    deck.classList.remove("is-asking");
+    deck.classList.add("is-cut", "is-done");
+    layout(true);
+    tweenDuration();
+    statusEl.textContent = "Ripple deleted 3 ranges across every track. Undo is one word away.";
+  }
+
+  function run(){
+    clearAll();
+    deck.className = "deck";
+    layout(false);
+    durEl.textContent = "24.0s";
+    typedEl.textContent = "";
+    statusEl.textContent = "Waiting for an instruction";
+
+    if (reduce){
+      typedEl.textContent = PROMPT;
+      deck.classList.add("is-marking");
+      finish();
+      return;
+    }
+
+    var i = 0;
+    (function type(){
+      if (i <= PROMPT.length){
+        typedEl.textContent = PROMPT.slice(0, i++);
+        at(38, type);
+      } else {
+        at(320, scan);
+      }
+    })();
+
+    function scan(){
+      statusEl.textContent = "Scanning the voice track…";
+      deck.classList.add("is-marking");
+      at(950, ask);
+    }
+    function ask(){
+      statusEl.textContent = "3 silent ranges, 2.9s total. This one is destructive.";
+      deck.classList.add("is-asking");
+      at(1250, function(){
+        approveBtn.classList.add("is-hit");
+        at(160, function(){ approveBtn.classList.remove("is-hit"); finish(); });
+      });
+    }
+  }
+
+  build();
+  layout(false);
+  approveBtn.addEventListener("click", function(){ clearAll(); finish(); });
+  replayBtn.addEventListener("click", run);
+
+  /* Hold the opening beat until the deck is actually on screen. */
+  if ("IntersectionObserver" in window){
+    var once = new IntersectionObserver(function(entries){
+      if (entries[0].isIntersecting){ once.disconnect(); at(280, run); }
+    }, {threshold: 0.35});
+    once.observe(deck);
+  } else { run(); }
+
+  /* ── scroll playhead: the rail and the slate both read the same clock ─ */
+  var railHead = document.getElementById("rail-head");
+  var railTc = document.getElementById("tc-rail");
+  var slateTc = document.getElementById("tc-slate");
+  var railMobile = document.getElementById("rail-mobile");
+  var REEL = 128; // seconds of "programme", so the timecode is a real scrub
+
+  function pad(n){ return n < 10 ? "0" + n : "" + n; }
+  function tick(){
+    var max = document.documentElement.scrollHeight - window.innerHeight;
+    var p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+    var secs = p * REEL;
+    var mm = Math.floor(secs / 60), ss = Math.floor(secs % 60);
+    var ff = Math.floor((secs % 1) * 24);
+    railHead.style.transform = "translateY(" + (p * (window.innerHeight - 52)) + "px)";
+    railTc.textContent = pad(mm) + ":" + pad(ss);
+    slateTc.textContent = "00:" + pad(mm) + ":" + pad(ss) + ":" + pad(ff);
+    if (railMobile) railMobile.style.width = (p * 100) + "%";
+  }
+  var queued = false;
+  window.addEventListener("scroll", function(){
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function(){ tick(); queued = false; });
+  }, {passive: true});
+  window.addEventListener("resize", tick);
+  tick();
+
+  /* ── reveal ─────────────────────────────────────────────────────────── */
+  var rv = document.querySelectorAll(".rv");
+  if (reduce || !("IntersectionObserver" in window)){
+    rv.forEach(function(el){ el.classList.add("in"); });
+  } else {
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, {threshold: 0.12, rootMargin: "0px 0px -8% 0px"});
+    rv.forEach(function(el, i){
+      el.style.transitionDelay = (Math.min(i % 6, 5) * 55) + "ms";
+      io.observe(el);
+    });
+  }
+})();
+</script>
+</body>
+</html>
