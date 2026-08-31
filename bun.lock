@@ -80,6 +80,14 @@
         "wrangler": "^4.70.0",
       },
     },
+    "packages/ffmpeg-sandbox": {
+      "name": "@editai/ffmpeg-sandbox",
+      "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.12.0",
+        "express": "^4.21.2",
+        "zod": "^3.24.1",
+      },
+    },
   },
   "packages": {
     "@acemir/cssom": ["@acemir/cssom@0.9.31", "", {}, "sha512-ZnR3GSaH+/vJ0YlHau21FjfLYjMpYVIzTD8M8vIEQvIGxeOXyXdzCI140rrCY862p/C/BbzWsjc1dgnM9mkoTA=="],
@@ -193,6 +201,8 @@
     "@ecies/ciphers": ["@ecies/ciphers@0.2.6", "", { "peerDependencies": { "@noble/ciphers": "^1.0.0" } }, "sha512-patgsRPKGkhhoBjETV4XxD0En4ui5fbX0hzayqI3M8tvNMGUoUvmyYAIWwlxBc1KX5cturfqByYdj5bYGRpN9g=="],
 
     "@editai/agent": ["@editai/agent@workspace:apps/agent"],
+
+    "@editai/ffmpeg-sandbox": ["@editai/ffmpeg-sandbox@workspace:packages/ffmpeg-sandbox"],
 
     "@editai/web": ["@editai/web@workspace:apps/web"],
 

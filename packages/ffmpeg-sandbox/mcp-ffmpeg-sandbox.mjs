@@ -4,12 +4,12 @@
 // Every ffmpeg/ffprobe invocation runs inside a throwaway Docker container with
 // no network, a single mounted workspace, capped memory/CPU, and a hard timeout.
 //
-//   npm i @modelcontextprotocol/sdk express zod
-//   docker build -t editai-sandbox .
-//   node mcp-ffmpeg-sandbox.mjs
+//   bun install                    (from the repo root; this is a workspace package)
+//   bun run build:image            (docker build -f Dockerfile.sandbox -t editai-sandbox .)
+//   bun run start                  (http://localhost:8931/mcp)
 //
-// Then in TrueForge: Settings -> Connectors -> add server by URL
-//   http://localhost:8931/mcp
+// `bun run setup` in apps/agent finds it here via /health, registers it with
+// TrueForge as the "ffmpeg-sandbox" connector, and attaches it to the agent.
 
 import express from "express";
 import { z } from "zod";

@@ -254,7 +254,9 @@ tool.response     {"success":true,"response":{"exitCode":0,"result":"338350\n"}}
 **Media sandbox (`packages/ffmpeg-sandbox`).** ffmpeg and ffprobe are not safe to point at
 agent-supplied arguments on the host, so every invocation runs in a throwaway container:
 `--network none`, capped memory and CPU, `--pids-limit 256`, a non-root user, a single mounted
-workspace, and a hard timeout. It exposes four tools:
+workspace, and a hard timeout. When its server is running, `setup.ts` registers it with the
+harness as the `ffmpeg-sandbox` connector and attaches it to the agent, deferred; the
+`video-editing` skill routes all raw media work through it. It exposes four tools:
 
 | Tool | What it does |
 | --- | --- |
@@ -286,10 +288,14 @@ npx @truefoundry/trueforge@latest        # http://localhost:8790
 # 2. the timeline tools
 cd apps/agent && bun run start           # http://localhost:8941
 
-# 3. wire them together (any one model key is enough)
-ANTHROPIC_API_KEY=sk-... bun run setup
+# 3. the media sandbox (optional, needs Docker; separate terminal)
+cd packages/ffmpeg-sandbox
+bun run build:image && bun run start     # http://localhost:8931/mcp
 
-# 4. the editor
+# 4. wire them together (any one model key is enough)
+cd apps/agent && ANTHROPIC_API_KEY=sk-... bun run setup
+
+# 5. the editor
 cd ../.. && bun run dev:web              # http://localhost:5173
 ```
 
@@ -317,6 +323,7 @@ and export refuses until real files are imported. `setup` is idempotent, so reru
 | `NVIDIA_API_KEY` | Registers NVIDIA NIM as a custom OpenAI-compatible provider. |
 | `OPENAI_COMPATIBLE_BASE_URL` + `_API_KEY` + `_MODELS` (+ `_NAME`) | Registers any other OpenAI-compatible endpoint: vLLM, Ollama, a gateway. |
 | `DAYTONA_API_KEY` | Configures the harness sandbox and enables it on the agent. |
+| `FFMPEG_SANDBOX_URL` | Where the media sandbox serves MCP. Defaults to `http://localhost:8931/mcp`; setup attaches it only when its `/health` answers. |
 | `EDITAI_MODEL` | Pins the agent's model instead of picking the best configured one. |
 | `EDITAI_CONNECTORS` | Extra MCP servers to attach, comma separated. Defaults to `exa`. |
 | `<NAME>_MCP_HEADER` | Credential for a header-auth connector, e.g. `BRIGHT_DATA_MCP_HEADER="Authorization: Bearer ..."`. |

@@ -4,7 +4,7 @@ The EditAI timeline, exposed to an agent harness.
 
 This package is two things in one small server:
 
-- **An MCP server** (`POST /mcp`) with 16 tools that read and edit a real video timeline.
+- **An MCP server** (`POST /mcp`) with 19 tools that read and edit a real video timeline.
 - **A live project store** (`GET /project`, `GET /events`) that the web app subscribes to, so
   edits the agent makes appear in the editor as they happen.
 
@@ -22,10 +22,14 @@ npx @truefoundry/trueforge@latest        # http://localhost:8790
 bun install
 bun run start                            # http://localhost:8941
 
-# 3. register models, the MCP server, the sandbox and the agent
+# 3. the ffmpeg media workbench (optional, needs Docker; separate terminal)
+cd ../../packages/ffmpeg-sandbox
+bun run build:image && bun run start     # http://localhost:8931/mcp
+
+# 4. register models, the MCP servers, the sandbox and the agent
 ANTHROPIC_API_KEY=sk-... bun run setup
 
-# 4. the editor
+# 5. the editor
 cd ../web && bun run dev                 # http://localhost:5173
 ```
 
@@ -42,6 +46,7 @@ cd ../web && bun run dev                 # http://localhost:5173
 | `EDITAI_MODEL` | Pins the agent's model instead of picking the best configured one. |
 | `EDITAI_CONNECTORS` | Extra MCP servers to attach, comma separated. Defaults to `exa` (keyless web search). |
 | `<NAME>_MCP_HEADER` | Credential for a header-auth connector, e.g. `GITHUB_MCP_HEADER="Authorization: Bearer ghp_..."`. |
+| `FFMPEG_SANDBOX_URL` | Where the ffmpeg workbench serves MCP. Defaults to `http://localhost:8931/mcp`; setup attaches it only when its `/health` answers. |
 | `TRUEFORGE_BASE_URL` | Defaults to `http://localhost:8790`. |
 | `EDITAI_AGENT_PORT` | Defaults to `8941`. |
 
@@ -55,6 +60,7 @@ becomes a correction rather than a failed turn.
 | Tool | Kind | What it does |
 | --- | --- | --- |
 | `get_project` | read | The whole timeline: tracks, clips, media metadata, exports. |
+| `list_media` | read | Every imported media file: duration, resolution, whether its bytes are on disk. |
 | `list_changes` | read | Recent edits. |
 | `transcribe_clip` | read | Speech inside one clip, as timed segments. |
 | `find_silences` | read | Silent ranges on the voice track. |
@@ -63,13 +69,15 @@ becomes a correction rather than a failed turn.
 | `trim_clip` | write | New in/out points. |
 | `move_clip` | write | New start time or track. |
 | `set_volume` | write | Clip volume. |
+| `add_clip` | write | Place an imported media file on a track. |
 | `add_text` | write | A title or caption. |
 | `add_captions` | write | Timed captions on the caption track. |
 | `undo` | write | Revert the last change. |
 | `delete_clip` | **destructive** | Remove a clip. |
 | `ripple_delete` | **destructive** | Remove a range from every track and close the gap. |
 | `remove_silences` | **destructive** | Ripple-delete every silence over a threshold. |
-| `export_project` | approval | Render the timeline to a file. |
+| `export_project` | approval | Queue a real render; the editor encodes it with WebCodecs. |
+| `get_export` | read | Poll a queued render: progress, then the file and its byte size. |
 
 Destructive tools are published with MCP's `destructiveHint` annotation. The agent's
 `require_approval_for_tools: ["@destructive", "export_project"]` turns that annotation into a
@@ -78,8 +86,15 @@ continues once a person allows or denies it.
 
 ## Connecting other tools
 
-`setup.ts` attaches any server from the TrueForge catalog by name, and handles all three auth
-styles:
+Beyond the catalog, setup wires in this repo's own media workbench: when
+`packages/ffmpeg-sandbox` is running (default `http://localhost:8931/mcp`, override with
+`FFMPEG_SANDBOX_URL`), it is registered as the `ffmpeg-sandbox` connector and attached to the
+agent with all tools deferred and `@destructive` approval on `run_python`. The `video-editing`
+skill routes all raw media work through it. When the server is down, setup skips it with a hint
+instead of registering a connector that would fail every call.
+
+`setup.ts` also attaches any server from the TrueForge catalog by name, and handles all three
+auth styles:
 
 ```bash
 EDITAI_CONNECTORS=exa bun run setup                    # keyless, the default
@@ -112,15 +127,16 @@ agent actually reaches for them.
 bun test
 ```
 
-12 tests over the timeline model: split/trim invariants, ripple-delete arithmetic across tracks,
-silence removal, transcript windowing, caption merging, and undo.
+43 tests over the timeline model: split/trim invariants, ripple-delete arithmetic across tracks,
+silence removal, transcript windowing, caption merging, export lifecycle, and undo.
 
 ## Notes
 
 - The store persists to `data/project.json`, which is gitignored. `POST /project/reset` restores the
   sample timeline.
-- `export_project` writes a JSON description of the render rather than encoding video. Wiring it to
-  ffmpeg is the obvious next step and does not change the agent-facing contract.
+- `export_project` queues a real render. The editor claims the job, encodes it with WebCodecs,
+  streams the chunks back, and the file lands in `data/exports/`; the agent polls `get_export`
+  for progress and the finished byte size.
 - The MCP SDK infers handler argument types from zod shapes. That inference exhausts the TypeScript
   compiler on a schema set this size, so `tools.ts` registers through a narrow facade and annotates
   each handler's arguments explicitly. See the comment at the top of that file.
