@@ -17,6 +17,7 @@ const MCP_URL = process.env.EDITAI_MCP_URL ?? `http://localhost:${process.env.ED
 const AGENT_NAME = process.env.EDITAI_AGENT_NAME ?? "editai"
 const SKILL_REPO = process.env.EDITAI_SKILL_REPO ?? "https://github.com/deonmenezes/edit-ai"
 const SKILL_REF = process.env.EDITAI_SKILL_REF ?? "main"
+const FFMPEG_SANDBOX_URL = process.env.FFMPEG_SANDBOX_URL ?? "http://localhost:8931/mcp"
 /** Catalog connectors to attach alongside the timeline tools. Keyless by default. */
 const CONNECTORS = (process.env.EDITAI_CONNECTORS ?? "exa")
   .split(",")
@@ -165,6 +166,34 @@ async function configureConnectors(): Promise<{ name: string; auth: string }[]> 
 }
 
 /**
+ * The video-editing skill routes all media work through the ffmpeg-sandbox connector,
+ * so setup registers it whenever its server is up. It is not a catalog entry: it is this
+ * repo's packages/ffmpeg-sandbox, running locally in front of Docker. Registering it while
+ * it is down would leave the agent with a connector that fails every call, so an
+ * unreachable server is skipped with a hint instead.
+ */
+async function configureFfmpegSandbox(): Promise<boolean> {
+  const health = FFMPEG_SANDBOX_URL.replace(/\/mcp\/?$/, "/health")
+  try {
+    const res = await fetch(health, { signal: AbortSignal.timeout(2000) })
+    if (!res.ok) return false
+  } catch {
+    return false
+  }
+  await api("PUT", "/settings/mcp-servers", {
+    manifest: {
+      type: "remote",
+      name: "ffmpeg-sandbox",
+      url: FFMPEG_SANDBOX_URL,
+      description:
+        "Dockerized media workbench: list and probe media files, run ffmpeg renders, and script " +
+        "glue work with python. No network access; paths are relative to its workspace.",
+    },
+  })
+  return true
+}
+
+/**
  * Skills live in this repo, so the harness fetches them from git rather than a local path:
  * a remote TrueForge cannot read this machine's disk. PUT is an upsert, POST is not, so a
  * second `bun run setup` refreshes the pin instead of failing on the duplicate name.
@@ -230,10 +259,22 @@ async function pickModel(): Promise<string> {
   return preferred.find((p) => names.includes(p)) ?? names[0]!
 }
 
-async function upsertAgent(model: string, sandbox: boolean, connectors: { name: string; auth: string }[]) {
+async function upsertAgent(model: string, sandbox: boolean, connectors: { name: string; auth: string }[], ffmpegSandbox: boolean) {
   const manifest = JSON.parse(readFileSync(join(here, "..", "agent.json"), "utf8"))
   manifest.model.name = model
   manifest.config.sandbox.enabled = sandbox
+  // The media workbench gets all its tools, deferred: the video-editing skill names them,
+  // so the agent finds them when a task calls for ffmpeg. run_python is published with
+  // destructiveHint (it can overwrite source media), and @destructive turns that into the
+  // same approval pause the timeline's delete tools get.
+  if (ffmpegSandbox && !manifest.mcp_servers.some((m: { name: string }) => m.name === "ffmpeg-sandbox")) {
+    manifest.mcp_servers.push({
+      name: "ffmpeg-sandbox",
+      enable_tools: ["@all"],
+      preload: false,
+      require_approval_for_tools: ["@destructive"],
+    })
+  }
   // Extra connectors are read-only and deferred: they should not enlarge the tool context
   // unless the agent actually reaches for research.
   for (const c of connectors) {
@@ -272,11 +313,19 @@ const connectors = await configureConnectors()
 console.log(
   `Extra connectors: ${connectors.length ? connectors.map((c) => `${c.name} (auth: ${c.auth})`).join(", ") : "none"}`,
 )
+const ffmpegSandbox = await configureFfmpegSandbox()
+console.log(
+  `ffmpeg sandbox: ${
+    ffmpegSandbox
+      ? `attached from ${FFMPEG_SANDBOX_URL}`
+      : "not running (cd packages/ffmpeg-sandbox && bun run build:image && bun run start), skipped"
+  }`,
+)
 const skills = await configureSkills()
 console.log(`Skills: ${skills.join(", ")} (from ${SKILL_REPO}@${SKILL_REF})`)
 const sandbox = await configureSandbox()
 console.log(`Sandbox: ${sandbox ? "Daytona configured, enabled on the agent" : "not configured (set DAYTONA_API_KEY to enable code execution and skills)"}`)
 const model = await pickModel()
-const agent = await upsertAgent(model, sandbox, connectors)
+const agent = await upsertAgent(model, sandbox, connectors, ffmpegSandbox)
 console.log(`Agent "${AGENT_NAME}" ${agent.updated ? "updated" : "created"} (id ${agent.id}) on model ${model}`)
 console.log(`Open ${TF} and pick "${AGENT_NAME}" in the Agents Library, or run the web app.`)

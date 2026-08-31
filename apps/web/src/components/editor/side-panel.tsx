@@ -1,9 +1,10 @@
-import { AudioLines, Captions, Film, Mic, Music, Scissors, Sparkles, Type, Upload, Wand2 } from "lucide-react"
-import { useState } from "react"
+import { AlertCircle, AudioLines, Captions, Film, Mic, Music, Scissors, Sparkles, Type, Upload, Wand2 } from "lucide-react"
+import { useRef, useState } from "react"
 import { Button } from "#/components/ui/button"
 import { ScrollArea } from "#/components/ui/scroll-area"
 import { cn } from "#/lib/utils"
-import { CLIP_TONE, type Clip } from "./data"
+import { CLIP_TONE, type Clip, type MediaInfo } from "./data"
+import type { ImportState } from "./use-media-import"
 
 type PanelId = "media" | "ai" | "text" | "audio"
 
@@ -23,11 +24,14 @@ const AI_ACTIONS = [
 
 type Props = {
   clips: Clip[]
+  media: Record<string, MediaInfo>
+  imports: ImportState[]
+  onImport: (files: File[]) => void
   onSuggest: (prompt: string) => void
   className?: string
 }
 
-export function SidePanel({ clips, onSuggest, className }: Props) {
+export function SidePanel({ clips, media, imports, onImport, onSuggest, className }: Props) {
   const [panel, setPanel] = useState<PanelId>("media")
 
   return (
@@ -52,7 +56,7 @@ export function SidePanel({ clips, onSuggest, className }: Props) {
 
       <ScrollArea className="hidden w-60 md:block">
         <div className="p-3">
-          {panel === "media" && <MediaPanel clips={clips} />}
+          {panel === "media" && <MediaPanel clips={clips} media={media} imports={imports} onImport={onImport} />}
           {panel === "ai" && <AiPanel onSuggest={onSuggest} />}
           {panel === "text" && <TextPanel />}
           {panel === "audio" && <AudioPanel />}
@@ -71,13 +75,26 @@ function PanelTitle({ children, action }: { children: React.ReactNode; action?: 
   )
 }
 
-function MediaPanel({ clips }: { clips: Clip[] }) {
-  const media = clips.filter((c) => c.kind !== "text")
+function MediaPanel({
+  clips,
+  media,
+  imports,
+  onImport,
+}: {
+  clips: Clip[]
+  media: Record<string, MediaInfo>
+  imports: ImportState[]
+  onImport: (files: File[]) => void
+}) {
+  const input = useRef<HTMLInputElement | null>(null)
+  const entries = Object.entries(media)
+  const usage = (name: string) => clips.filter((c) => c.name === name).length
+
   return (
     <div>
       <PanelTitle
         action={
-          <Button variant="outline" size="xs">
+          <Button variant="outline" size="xs" onClick={() => input.current?.click()}>
             <Upload className="size-3.5" />
             Import
           </Button>
@@ -85,29 +102,72 @@ function MediaPanel({ clips }: { clips: Clip[] }) {
       >
         Media
       </PanelTitle>
-      <ul className="flex flex-col gap-1.5">
-        {media.map((c) => (
-          <li key={c.id}>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 rounded-md border bg-card p-2 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+      <input
+        ref={input}
+        type="file"
+        accept="video/*,audio/*"
+        multiple
+        aria-label="Import video or audio files"
+        className="sr-only"
+        onChange={(e) => {
+          onImport(Array.from(e.target.files ?? []))
+          // Clearing lets the same file be picked again after a failed import.
+          e.target.value = ""
+        }}
+      />
+
+      {imports.length > 0 && (
+        <ul className="mb-2 flex flex-col gap-1">
+          {imports.map((i) => (
+            <li
+              key={i.name}
+              className={cn(
+                "flex items-center gap-1.5 rounded-sm border px-2 py-1 text-[11px]",
+                i.stage === "failed" ? "border-destructive/50 text-destructive" : "text-muted-foreground",
+              )}
             >
+              {i.stage === "failed" && <AlertCircle className="size-3 shrink-0" />}
+              <span className="min-w-0 flex-1 truncate">{i.name}</span>
+              <span className="shrink-0">{i.stage === "failed" ? (i.error ?? "failed") : i.stage}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <ul className="flex flex-col gap-1.5">
+        {entries.map(([name, info]) => (
+          <li key={name}>
+            <div className="flex w-full items-center gap-2.5 rounded-md border bg-card p-2 text-left">
               <span
                 aria-hidden
                 className="flex size-9 shrink-0 items-center justify-center rounded-sm bg-well"
-                style={{ color: CLIP_TONE[c.kind] }}
+                style={{ color: CLIP_TONE[info.width ? "video" : "audio"] }}
               >
-                {c.kind === "video" ? <Film className="size-4" /> : <AudioLines className="size-4" />}
+                {info.width ? <Film className="size-4" /> : <AudioLines className="size-4" />}
               </span>
               <span className="min-w-0">
-                <span className="block truncate text-sm">{c.name}</span>
-                <span className="block font-mono text-[11px] tabular-nums text-muted-foreground">{c.duration.toFixed(1)}s</span>
+                <span className="block truncate text-sm">{name}</span>
+                <span className="block font-mono text-[11px] tabular-nums text-muted-foreground">
+                  {info.duration.toFixed(1)}s
+                  {info.width && info.height ? ` · ${info.height}p` : ""}
+                  {usage(name) > 0 ? ` · ${usage(name)} on timeline` : ""}
+                </span>
               </span>
-            </button>
+              {!info.file && (
+                <span title="No bytes on disk: this cannot be previewed or rendered" className="ml-auto shrink-0 text-muted-foreground">
+                  <AlertCircle className="size-3.5" />
+                </span>
+              )}
+            </div>
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-xs text-muted-foreground">Drag a file here or onto the timeline to add it.</p>
+
+      <p className="mt-3 text-xs text-muted-foreground">
+        {entries.length === 0
+          ? "No media yet. Import a video or audio file to start editing."
+          : "Drop files anywhere in the editor to import more."}
+      </p>
     </div>
   )
 }

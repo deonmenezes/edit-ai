@@ -1,2 +1,6 @@
+# Runtime state: the working project, imported media, renders and generated samples.
+# A clone should start from the seed, not from somebody's timeline.
 data/project.json
 data/exports/
+data/media/
+data/samples/

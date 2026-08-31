@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname } from "node:path"
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
 
 export type ClipKind = "video" | "text" | "audio"
 
@@ -31,15 +31,41 @@ export type MediaInfo = {
   transcript?: Segment[]
   /** beats per minute, for music */
   bpm?: number
+  /** Set once real bytes are on disk. File name inside the media dir. */
+  file?: string
+  width?: number
+  height?: number
+  fps?: number
+  hasAudio?: boolean
+  sizeBytes?: number
+  /** Peak envelope over the whole file, 0..1, for the timeline waveform. */
+  peaks?: number[]
+  /** Where silences/peaks came from: absent means they were never measured. */
+  analyzedAt?: string
 }
+
+export type ExportStatus = "pending" | "rendering" | "done" | "failed"
 
 export type ExportRecord = {
   id: string
   format: string
   resolution: string
+  width: number
+  height: number
+  fps: number
   createdAt: string
   durationSeconds: number
   file: string
+  status: ExportStatus
+  /** 0..1 while rendering. */
+  progress?: number
+  /** Real bytes on disk, only once status is "done". */
+  sizeBytes?: number
+  completedAt?: string
+  error?: string
+  /** When a worker took the job, and when it last showed a sign of life. */
+  claimedAt?: string
+  heartbeatAt?: string
 }
 
 export type Project = {
@@ -112,6 +138,11 @@ export function seedProject(): Project {
   }
 }
 
+/** A project with the standard track layout and nothing on it, for starting from real footage. */
+export function emptyProject(): Project {
+  return { ...seedProject(), clips: [], media: {}, duration: 0, exports: [] }
+}
+
 export class ProjectStore {
   private project: Project
   private snapshots: Project[] = []
@@ -119,8 +150,19 @@ export class ProjectStore {
   private listeners = new Set<(p: Project, change: Change | null) => void>()
   revision = 0
 
-  constructor(private file?: string) {
+  constructor(
+    private file?: string,
+    /** Where media bytes live. Given, the store can tell a registered file from a present one. */
+    private mediaDir?: string,
+  ) {
     this.project = file && existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Project) : seedProject()
+  }
+
+  /** Media is only usable once its bytes are actually on disk, not merely named. */
+  hasBytes(name: string): boolean {
+    const info = this.project.media[name]
+    if (!info?.file) return false
+    return this.mediaDir ? existsSync(join(this.mediaDir, info.file)) : true
   }
 
   get(): Project {
@@ -136,10 +178,10 @@ export class ProjectStore {
     return () => this.listeners.delete(fn)
   }
 
-  reset() {
+  reset(opts: { empty?: boolean } = {}) {
     this.snapshots = []
     this.changes = []
-    this.project = seedProject()
+    this.project = opts.empty ? emptyProject() : seedProject()
     this.persist(null)
   }
 
@@ -404,22 +446,279 @@ export class ProjectStore {
     return { track, clips: this.project.clips.filter((c) => ids.includes(c.id)) }
   }
 
-  exportProject(format: string, resolution: string, dir: string): ExportRecord {
+  // ---- real media -----------------------------------------------------------
+
+  /**
+   * Record media whose bytes are on disk. Metadata is measured by the editor (WebCodecs)
+   * rather than guessed here, so the agent server needs no ffprobe of its own.
+   */
+  registerMedia(name: string, info: Omit<MediaInfo, "silences" | "transcript" | "peaks">): MediaInfo {
+    if (!name.trim()) throw new Error("Media needs a name.")
+    this.commit("import_media", `Imported ${name} (${round(info.duration)}s)`, (p) => {
+      p.media[name] = { ...p.media[name], ...info }
+    })
+    return this.project.media[name]!
+  }
+
+  /** Attach measurements taken from the decoded audio: silences, peak envelope, tempo. */
+  setMediaAnalysis(name: string, analysis: { silences?: Segment[]; peaks?: number[]; bpm?: number; transcript?: Segment[] }): MediaInfo {
+    const media = this.project.media[name]
+    if (!media) throw new Error(`No media named "${name}".`)
+    const counted = analysis.silences ? `${analysis.silences.length} silences` : "waveform"
+    this.commit("analyze_media", `Analyzed ${name}: ${counted}`, (p) => {
+      p.media[name] = { ...p.media[name]!, ...analysis, analyzedAt: new Date().toISOString() }
+    })
+    return this.project.media[name]!
+  }
+
+  /** Put imported media on the timeline. Unlike addTextClip this needs a real source file. */
+  addClip(opts: { name: string; trackId: string; start: number; duration?: number; sourceOffset?: number }): Clip {
+    const track = this.track(opts.trackId)
+    if (track.kind === "text") throw new Error(`${track.label} is a text track; use add_text instead.`)
+    const media = this.project.media[opts.name]
+    if (!media) throw new Error(`No media named "${opts.name}". Call list_media to see what has been imported.`)
+    if (!this.hasBytes(opts.name)) throw new Error(`"${opts.name}" has no media on disk yet, so it cannot be placed on the timeline.`)
+    const sourceOffset = opts.sourceOffset ?? 0
+    if (sourceOffset < 0 || sourceOffset >= media.duration) {
+      throw new Error(`sourceOffset ${sourceOffset}s is outside ${opts.name} (0s to ${media.duration}s).`)
+    }
+    const duration = opts.duration ?? media.duration - sourceOffset
+    if (duration <= 0) throw new Error("Duration must be positive.")
+    if (sourceOffset + duration > media.duration + 1e-6) {
+      throw new Error(`${opts.name} only has ${round(media.duration - sourceOffset)}s left after a ${sourceOffset}s offset.`)
+    }
+    if (opts.start < 0) throw new Error("Clips cannot start before 0s.")
+    let id = ""
+    this.commit("add_clip", `Added ${opts.name} at ${round(opts.start)}s on ${track.label}`, (p) => {
+      id = this.newId("c")
+      p.clips.push({
+        id,
+        name: opts.name,
+        kind: track.kind,
+        trackId: track.id,
+        start: opts.start,
+        duration,
+        sourceOffset,
+        ...(track.kind === "audio" ? { volume: 100 } : {}),
+      })
+    })
+    return this.clip(id)
+  }
+
+  // ---- export ---------------------------------------------------------------
+
+  /**
+   * Queue a render. The encode happens in the editor, which owns the decoders, so this
+   * only creates the job; the file appears when the editor posts the bytes back.
+   */
+  requestExport(format: string, resolution: string, dir: string): ExportRecord {
+    assertRenderTarget(format, resolution)
+    const missing = this.missingMedia()
+    if (missing.length > 0) {
+      throw new Error(
+        `Cannot render: ${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no media on disk. ` +
+          `Import real footage first, or remove those clips.`,
+      )
+    }
+    const { width, height } = resolutionToSize(resolution)
+    const used = new Set(this.project.exports.map((e) => e.id))
+    let n = this.project.exports.length + 1
+    while (used.has(`exp${n}`)) n++
     const rec: ExportRecord = {
-      id: `exp${this.project.exports.length + 1}`,
+      id: `exp${n}`,
       format,
       resolution,
+      width,
+      height,
+      fps: this.project.fps,
       createdAt: new Date().toISOString(),
       durationSeconds: this.project.duration,
-      file: `${dir}/${this.project.name.replace(/\s+/g, "-").toLowerCase()}-${resolution}.${format}`,
+      file: join(dir, `${slug(this.project.name)}-${resolution}-exp${n}.${format}`),
+      status: "pending",
+      progress: 0,
     }
-    // Written before the commit: commit notifies subscribers synchronously, and a client that
-    // reacts to the new export record must not find the file missing.
     mkdirSync(dir, { recursive: true })
-    writeFileSync(rec.file, JSON.stringify({ export: rec, project: this.project }, null, 2))
-    this.commit("export_project", `Exported ${resolution} ${format}`, (p) => {
+    // The render must be of the timeline as it was approved, not of whatever it has become by
+    // the time an editor picks the job up, so the project is frozen here beside the job.
+    writeFileSync(snapshotPath(rec), JSON.stringify(this.project, null, 2))
+    this.commit("export_project", `Queued a ${resolution} ${format} render`, (p) => {
       p.exports.push(rec)
     })
     return rec
   }
+
+  /** The timeline as it stood when a render was queued. */
+  exportSnapshot(id: string): Project {
+    const rec = this.getExport(id)
+    const path = snapshotPath(rec)
+    if (!existsSync(path)) throw new Error(`Export ${id} has no snapshot; it cannot be rendered faithfully.`)
+    return JSON.parse(readFileSync(path, "utf8")) as Project
+  }
+
+  /** Clips whose source media has no bytes on disk. Nothing can be rendered from those. */
+  missingMedia(): string[] {
+    const names = new Set<string>()
+    for (const c of this.project.clips) {
+      if (c.kind === "text") continue
+      if (!this.hasBytes(c.name)) names.add(c.name)
+    }
+    return [...names]
+  }
+
+  getExport(id: string): ExportRecord {
+    const rec = this.project.exports.find((e) => e.id === id)
+    if (!rec) throw new Error(`No export with id "${id}".`)
+    return structuredClone(rec)
+  }
+
+  /** The oldest render an editor could take: never started, or abandoned mid-flight. */
+  pendingExport(): ExportRecord | null {
+    return structuredClone(this.project.exports.find(isClaimable) ?? null)
+  }
+
+  private updateExport(id: string, fn: (rec: ExportRecord) => void, op: string, summary: string) {
+    if (!this.project.exports.some((e) => e.id === id)) throw new Error(`No export with id "${id}".`)
+    this.commit(op, summary, (p) => {
+      fn(p.exports.find((e) => e.id === id)!)
+    })
+    return this.getExport(id)
+  }
+
+  /**
+   * Take a queued render. Returns null if it is already claimed, which is how two editors
+   * open on the same project avoid both encoding it: only one claim can win.
+   */
+  claimExport(id: string): ExportRecord | null {
+    const rec = this.project.exports.find((e) => e.id === id)
+    if (!rec || !isClaimable(rec)) return null
+    const retry = rec.status === "rendering"
+    const now = new Date().toISOString()
+    return this.updateExport(
+      id,
+      (r) => {
+        r.status = "rendering"
+        r.progress = 0
+        r.claimedAt = now
+        r.heartbeatAt = now
+      },
+      "export_claimed",
+      retry ? `Reclaimed abandoned render ${id}` : `Started rendering ${id}`,
+    )
+  }
+
+  /** Queued, or claimed by a worker that has gone quiet for longer than the lease. */
+  claimableExports(): ExportRecord[] {
+    return this.project.exports.filter(isClaimable).map((e) => structuredClone(e))
+  }
+
+  setExportProgress(id: string, progress: number) {
+    // A finished render must not be reopened by a straggling progress report.
+    const current = this.getExport(id)
+    if (current.status !== "rendering") return current
+    const clamped = Math.max(0, Math.min(1, progress))
+    return this.updateExport(
+      id,
+      (rec) => {
+        rec.progress = clamped
+        rec.heartbeatAt = new Date().toISOString()
+      },
+      "export_progress",
+      `Rendering ${id}: ${Math.round(clamped * 100)}%`,
+    )
+  }
+
+  /**
+   * Finish a render whose bytes are already on disk at `uploadedPath`.
+   *
+   * A path rather than a buffer: a 4K render is gigabytes, and reading it into the server only
+   * to write it out again would be the one place this design needs the whole file in memory.
+   */
+  completeExport(id: string, uploadedPath: string) {
+    const rec = this.getExport(id)
+    if (!existsSync(uploadedPath)) throw new Error(`No uploaded file at ${uploadedPath}.`)
+    // Moved before the commit: commit notifies subscribers synchronously, and a client that
+    // reacts to the finished export must not find the file missing.
+    mkdirSync(dirname(rec.file), { recursive: true })
+    renameSync(uploadedPath, rec.file)
+    const sizeBytes = statSync(rec.file).size
+    // The snapshot exists so an abandoned render can be retried faithfully. Done is terminal,
+    // so it has nothing left to serve.
+    const snapshot = snapshotPath(rec)
+    if (existsSync(snapshot)) unlinkSync(snapshot)
+    return this.updateExport(
+      id,
+      (r) => {
+        r.status = "done"
+        r.progress = 1
+        r.sizeBytes = sizeBytes
+        r.completedAt = new Date().toISOString()
+        delete r.error
+      },
+      "export_done",
+      `Rendered ${rec.resolution} ${rec.format} (${(sizeBytes / 1e6).toFixed(1)} MB)`,
+    )
+  }
+
+  failExport(id: string, error: string) {
+    // Same reason: a late failure from a losing worker must not bury a finished file.
+    const current = this.getExport(id)
+    if (current.status === "done") return current
+    return this.updateExport(
+      id,
+      (rec) => {
+        rec.status = "failed"
+        rec.error = error
+      },
+      "export_failed",
+      `Render ${id} failed: ${error}`,
+    )
+  }
+}
+
+/**
+ * How long a claimed render may go silent before another editor may take it over.
+ *
+ * Without this a tab that is closed mid-render strands the job in `rendering` forever: only
+ * the worker that claimed it can report failure, and it is gone.
+ */
+export const RENDER_LEASE_MS = 60_000
+
+export function isClaimable(rec: ExportRecord, now = Date.now()): boolean {
+  if (rec.status === "pending") return true
+  if (rec.status !== "rendering") return false
+  const last = Date.parse(rec.heartbeatAt ?? rec.claimedAt ?? rec.createdAt)
+  return Number.isFinite(last) && now - last > RENDER_LEASE_MS
+}
+
+const snapshotPath = (rec: ExportRecord) => `${rec.file}.project.json`
+
+/** Render sizes are 16:9, matching the editor's preview. */
+const SIZES: Record<string, { width: number; height: number }> = {
+  "720p": { width: 1280, height: 720 },
+  "1080p": { width: 1920, height: 1080 },
+  "4k": { width: 3840, height: 2160 },
+}
+
+const FORMATS = new Set(["mp4", "webm"])
+
+export function resolutionToSize(resolution: string): { width: number; height: number } {
+  const size = SIZES[resolution]
+  if (!size) throw new Error(`Unknown resolution "${resolution}". Use one of: ${Object.keys(SIZES).join(", ")}.`)
+  return size
+}
+
+/**
+ * Both of these end up inside the output path. The MCP tool constrains them with zod, but the
+ * HTTP route does not, and `join` happily normalizes `../` out of a directory, so they are
+ * checked against the allowed sets here where the path is actually built.
+ */
+function assertRenderTarget(format: string, resolution: string) {
+  if (!FORMATS.has(format)) throw new Error(`Unknown format "${format}". Use one of: ${[...FORMATS].join(", ")}.`)
+  resolutionToSize(resolution)
+}
+
+/** The project name is part of the file name, so it is reduced to a safe slug. */
+function slug(name: string): string {
+  const cleaned = name.replace(/[^a-zA-Z0-9-_ ]/g, "").trim().replace(/\s+/g, "-").toLowerCase()
+  return cleaned.slice(0, 60) || "project"
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react"
+import { AGENT_URL } from "#/lib/agent"
 import { PROJECT, type Project } from "./data"
 
-export const AGENT_URL = (import.meta.env.VITE_EDITAI_AGENT_URL as string | undefined) ?? "http://localhost:8941"
+export { AGENT_URL }
 
 type State = { project: Project; connected: boolean; revision: number; lastChange: string | null }
 

@@ -1,0 +1,16 @@
+{
+  "name": "@editai/ffmpeg-sandbox",
+  "private": true,
+  "type": "module",
+  "description": "MCP server exposing a dockerized media workbench: every ffmpeg/ffprobe/python invocation runs in a throwaway container with no network.",
+  "scripts": {
+    "build:image": "docker build -f Dockerfile.sandbox -t editai-sandbox .",
+    "start": "node mcp-ffmpeg-sandbox.mjs",
+    "dev": "node --watch mcp-ffmpeg-sandbox.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "express": "^4.21.2",
+    "zod": "^3.24.1"
+  }
+}

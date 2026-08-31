@@ -1,7 +1,7 @@
 {
   "name": "editai",
   "private": true,
-  "workspaces": ["apps/*"],
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev": "turbo dev",
     "dev:web": "turbo dev --filter=@editai/web",

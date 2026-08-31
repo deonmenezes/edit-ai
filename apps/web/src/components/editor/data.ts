@@ -21,6 +21,46 @@ export type Track = {
   kind: ClipKind
 }
 
+export type Segment = { start: number; end: number; text?: string }
+
+/** What the agent knows about one source file. Mirrors MediaInfo in apps/agent. */
+export type MediaInfo = {
+  duration: number
+  silences?: Segment[]
+  transcript?: Segment[]
+  bpm?: number
+  /** Present once real bytes are on disk. Without it a clip cannot be drawn or rendered. */
+  file?: string
+  width?: number
+  height?: number
+  fps?: number
+  hasAudio?: boolean
+  sizeBytes?: number
+  peaks?: number[]
+  analyzedAt?: string
+}
+
+export type ExportStatus = "pending" | "rendering" | "done" | "failed"
+
+export type ExportRecord = {
+  id: string
+  format: string
+  resolution: string
+  width: number
+  height: number
+  fps: number
+  createdAt: string
+  durationSeconds: number
+  file: string
+  status: ExportStatus
+  progress?: number
+  sizeBytes?: number
+  completedAt?: string
+  error?: string
+  claimedAt?: string
+  heartbeatAt?: string
+}
+
 export type Project = {
   name: string
   fps: number
@@ -28,7 +68,8 @@ export type Project = {
   duration: number
   tracks: Track[]
   clips: Clip[]
-  exports?: { id: string; format: string; resolution: string; createdAt: string; file: string }[]
+  media?: Record<string, MediaInfo>
+  exports?: ExportRecord[]
 }
 
 export const PROJECT: Project = {

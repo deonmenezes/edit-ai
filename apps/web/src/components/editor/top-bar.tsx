@@ -3,7 +3,9 @@ import { Button } from "#/components/ui/button"
 import { Separator } from "#/components/ui/separator"
 import { cn } from "#/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip"
-import { formatTimecode } from "./data"
+import { AGENT_URL } from "#/lib/agent"
+import { formatTimecode, type ExportRecord } from "./data"
+import type { RenderState } from "./use-render-worker"
 
 type Props = {
   projectName: string
@@ -11,9 +13,13 @@ type Props = {
   fps: number
   live: boolean
   lastChange: string | null
+  render: RenderState
+  lastExport?: ExportRecord
+  onExport: () => void
+  canExport: boolean
 }
 
-export function TopBar({ projectName, time, fps, live, lastChange }: Props) {
+export function TopBar({ projectName, time, fps, live, lastChange, render, lastExport, onExport, canExport }: Props) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-panel px-3">
       <a href="/" className="flex items-baseline gap-1.5 rounded-sm px-1 focus-visible:outline-2 focus-visible:outline-ring">
@@ -39,16 +45,23 @@ export function TopBar({ projectName, time, fps, live, lastChange }: Props) {
       <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground md:ml-0">
         {formatTimecode(time, fps)}
       </span>
-      <Button variant="outline" size="sm" className="hidden sm:inline-flex">
-        <Share2 className="size-4" />
-        Share
-      </Button>
-      <Button size="sm">
+      {lastExport?.status === "done" ? (
+        <Button variant="outline" size="sm" className="hidden sm:inline-flex" render={<a href={`${AGENT_URL}/exports/${lastExport.id}/file`} download />}>
+          <Share2 className="size-4" />
+          {formatBytes(lastExport.sizeBytes)}
+        </Button>
+      ) : null}
+      <Button size="sm" onClick={onExport} disabled={!canExport || render !== null}>
         <Download className="size-4" />
-        Export
+        {render ? `Rendering ${Math.round(render.progress * 100)}%` : "Export"}
       </Button>
     </header>
   )
+}
+
+function formatBytes(bytes?: number) {
+  if (!bytes) return "Download"
+  return bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.round(bytes / 1e3)} KB`
 }
 
 function IconButton({ label, icon }: { label: string; icon: React.ReactNode }) {
